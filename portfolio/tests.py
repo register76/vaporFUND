@@ -853,3 +853,193 @@ class ApprovalCommandTests(TestCase):
                 contribution=1,
                 stdout=StringIO(),
             )
+
+class PurchaseConfirmationTests(TestCase):
+    def setUp(self):
+        call_command(
+            "seed_portfolio",
+            stdout=StringIO(),
+        )
+
+        prices = {
+            "SCHB": "30.00",
+            "XMMO": "120.00",
+            "AVUV": "90.00",
+            "VEA": "50.00",
+            "VWO": "40.00",
+            "VTEB": "50.00",
+        }
+
+        self.etfs = {}
+
+        for ticker, value in prices.items():
+            etf = ETF.objects.get(ticker=ticker)
+            self.etfs[ticker] = etf
+
+            PriceHistory.objects.create(
+                etf=etf,
+                date=date(2026, 8, 28),
+                close=Decimal(value),
+                adjusted_close=Decimal(value),
+            )
+
+        call_command(
+            "add_contribution",
+            contribution_date="2026-08-31",
+            amount="100.00",
+            stdout=StringIO(),
+        )
+
+        call_command(
+            "generate_recommendation",
+            contribution=1,
+            stdout=StringIO(),
+        )
+
+        self.contribution = Contribution.objects.get(
+            sequence_number=1
+        )
+        self.recommendation = Recommendation.objects.get(
+            contribution=self.contribution
+        )
+
+    def approve(self):
+        call_command(
+            "approve_recommendation",
+            contribution=1,
+            stdout=StringIO(),
+        )
+
+    def confirm(
+        self,
+        price="30.00",
+        shares=1,
+    ):
+        output = StringIO()
+
+        call_command(
+            "confirm_purchase",
+            contribution=1,
+            price=price,
+            shares=shares,
+            trade_date="2026-08-31",
+            fees="0.00",
+            stdout=output,
+        )
+
+        return output.getvalue()
+
+    def test_purchase_requires_approval(self):
+        with self.assertRaisesMessage(
+            CommandError,
+            "has not been compliance-approved",
+        ):
+            self.confirm()
+
+        self.assertFalse(
+            TradeExecution.objects.exists()
+        )
+        self.assertFalse(
+            HoldingLot.objects.exists()
+        )
+
+    def test_confirmed_purchase_updates_complete_ledger(
+        self,
+    ):
+        self.approve()
+        output = self.confirm()
+
+        self.recommendation.refresh_from_db()
+        self.contribution.refresh_from_db()
+
+        execution = TradeExecution.objects.get()
+        lot = HoldingLot.objects.get()
+
+        shared_cash = (
+            CashTransaction.objects.aggregate(
+                total=Sum("amount")
+            )["total"]
+        )
+
+        self.assertEqual(
+            self.recommendation.status,
+            Recommendation.Status.EXECUTED,
+        )
+        self.assertTrue(self.contribution.processed)
+        self.assertEqual(
+            execution.etf,
+            self.etfs["SCHB"],
+        )
+        self.assertEqual(execution.shares, 1)
+        self.assertEqual(
+            execution.total_cost,
+            Decimal("30.00"),
+        )
+        self.assertEqual(
+            shared_cash,
+            Decimal("70.00"),
+        )
+        self.assertEqual(
+            lot.shares_acquired,
+            1,
+        )
+        self.assertEqual(
+            lot.shares_remaining,
+            1,
+        )
+        self.assertEqual(
+            lot.compliance_eligible_date,
+            date(2026, 9, 30),
+        )
+        self.assertIn(
+            "Remaining shared cash: $70.00",
+            output,
+        )
+
+    def test_purchase_cannot_exceed_recommendation(self):
+        self.approve()
+
+        with self.assertRaisesMessage(
+            CommandError,
+            "cannot exceed",
+        ):
+            self.confirm(shares=2)
+
+        self.assertFalse(
+            TradeExecution.objects.exists()
+        )
+
+    def test_purchase_cannot_exceed_available_cash(self):
+        self.approve()
+
+        with self.assertRaisesMessage(
+            CommandError,
+            "Insufficient cash",
+        ):
+            self.confirm(price="101.00")
+
+        self.assertFalse(
+            TradeExecution.objects.exists()
+        )
+        self.assertFalse(
+            HoldingLot.objects.exists()
+        )
+
+    def test_recommendation_cannot_execute_twice(self):
+        self.approve()
+        self.confirm()
+
+        with self.assertRaisesMessage(
+            CommandError,
+            "already has an execution",
+        ):
+            self.confirm()
+
+        self.assertEqual(
+            TradeExecution.objects.count(),
+            1,
+        )
+        self.assertEqual(
+            HoldingLot.objects.count(),
+            1,
+        )
