@@ -729,3 +729,127 @@ class RecommendationCommandTests(TestCase):
             "no longer a draft",
         ):
             self.generate()
+
+class ApprovalCommandTests(TestCase):
+    def setUp(self):
+        call_command(
+            "seed_portfolio",
+            stdout=StringIO(),
+        )
+
+        prices = {
+            "SCHB": "30.00",
+            "XMMO": "120.00",
+            "AVUV": "90.00",
+            "VEA": "50.00",
+            "VWO": "40.00",
+            "VTEB": "50.00",
+        }
+
+        self.etfs = {}
+
+        for ticker, value in prices.items():
+            etf = ETF.objects.get(ticker=ticker)
+            self.etfs[ticker] = etf
+
+            PriceHistory.objects.create(
+                etf=etf,
+                date=date(2026, 8, 28),
+                close=Decimal(value),
+                adjusted_close=Decimal(value),
+            )
+
+        call_command(
+            "add_contribution",
+            contribution_date="2026-08-31",
+            amount="100.00",
+            stdout=StringIO(),
+        )
+
+        self.contribution = Contribution.objects.get(
+            sequence_number=1
+        )
+
+    def generate(self):
+        call_command(
+            "generate_recommendation",
+            contribution=1,
+            stdout=StringIO(),
+        )
+
+        return Recommendation.objects.get(
+            contribution=self.contribution
+        )
+
+    def test_buy_recommendation_can_be_approved(self):
+        recommendation = self.generate()
+
+        output = StringIO()
+
+        call_command(
+            "approve_recommendation",
+            contribution=1,
+            stdout=output,
+        )
+
+        recommendation.refresh_from_db()
+
+        self.assertEqual(
+            recommendation.status,
+            Recommendation.Status.COMPLIANCE_APPROVED,
+        )
+        self.assertFalse(
+            TradeExecution.objects.exists()
+        )
+        self.assertFalse(
+            HoldingLot.objects.exists()
+        )
+        self.assertFalse(
+            self.contribution.processed
+        )
+        self.assertIn(
+            "no brokerage order has been placed",
+            output.getvalue(),
+        )
+
+    def test_hold_cash_cannot_be_approved(self):
+        ETF.objects.update(target_percent=0)
+
+        xmmo = self.etfs["XMMO"]
+        xmmo.target_percent = 100
+        xmmo.save(update_fields=["target_percent"])
+
+        recommendation = self.generate()
+
+        self.assertEqual(
+            recommendation.action,
+            Recommendation.Action.HOLD_CASH,
+        )
+
+        with self.assertRaisesMessage(
+            CommandError,
+            "no purchase to approve",
+        ):
+            call_command(
+                "approve_recommendation",
+                contribution=1,
+                stdout=StringIO(),
+            )
+
+        recommendation.refresh_from_db()
+
+        self.assertEqual(
+            recommendation.status,
+            Recommendation.Status.DRAFT,
+        )
+
+    def test_missing_recommendation_is_rejected(self):
+        with self.assertRaisesMessage(
+            CommandError,
+            "No recommendation exists",
+        ):
+            call_command(
+                "approve_recommendation",
+                contribution=1,
+                stdout=StringIO(),
+            )
