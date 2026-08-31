@@ -14,9 +14,17 @@ from .models import (
     CashTransaction,
     Contribution,
     ETF, 
+    HoldingLot,
     PriceHistory,
+    Recommendation,
+    TradeExecution,
 )
 
+from .services import (
+    AllocationError,
+    calculate_allocation,
+    choose_share_quantity,
+)
 
 class PortfolioConfigurationTests(TestCase):
     def run_seed(self):
@@ -317,3 +325,237 @@ class ContributionTests(TestCase):
             shared_cash,
             Decimal("250.00"),
         )
+
+class AllocationServiceTests(TestCase):
+    def setUp(self):
+        call_command(
+            "seed_portfolio",
+            stdout=StringIO(),
+        )
+
+        prices = {
+            "SCHB": "30.00",
+            "XMMO": "120.00",
+            "AVUV": "90.00",
+            "VEA": "50.00",
+            "VWO": "40.00",
+            "VTEB": "50.00",
+        }
+
+        self.etfs = {}
+
+        for ticker, value in prices.items():
+            etf = ETF.objects.get(ticker=ticker)
+            self.etfs[ticker] = etf
+
+            PriceHistory.objects.create(
+                etf=etf,
+                date=date(2026, 8, 28),
+                close=Decimal(value),
+                adjusted_close=Decimal(value),
+            )
+
+    def add_cash(self, amount="100.00"):
+        call_command(
+            "add_contribution",
+            contribution_date="2026-08-31",
+            amount=amount,
+            stdout=StringIO(),
+        )
+
+        return Contribution.objects.get(
+            date=date(2026, 8, 31)
+        )
+
+    def test_empty_portfolio_selects_one_schb_share(self):
+        self.add_cash()
+
+        decision = calculate_allocation(
+            date(2026, 8, 31)
+        )
+
+        self.assertEqual(
+            decision.selected.etf,
+            self.etfs["SCHB"],
+        )
+        self.assertEqual(decision.action, "BUY")
+        self.assertEqual(decision.shares, 1)
+        self.assertEqual(
+            decision.estimated_cost,
+            Decimal("30.00"),
+        )
+        self.assertEqual(
+            decision.remaining_cash,
+            Decimal("70.00"),
+        )
+
+    def test_unaffordable_selected_etf_holds_cash(self):
+        ETF.objects.update(target_percent=0)
+
+        xmmo = self.etfs["XMMO"]
+        xmmo.target_percent = 100
+        xmmo.save(update_fields=["target_percent"])
+
+        self.add_cash()
+
+        decision = calculate_allocation(
+            date(2026, 8, 31)
+        )
+
+        self.assertEqual(
+            decision.selected.etf,
+            xmmo,
+        )
+        self.assertEqual(
+            decision.action,
+            "HOLD_CASH",
+        )
+        self.assertEqual(decision.shares, 0)
+        self.assertEqual(
+            decision.remaining_cash,
+            Decimal("100.00"),
+        )
+        self.assertIn(
+            "no substitute ETF",
+            decision.reason,
+        )
+
+    def test_invalid_target_total_is_rejected(self):
+        schb = self.etfs["SCHB"]
+        schb.target_percent = 39
+        schb.save(update_fields=["target_percent"])
+
+        self.add_cash()
+
+        with self.assertRaisesMessage(
+            AllocationError,
+            "not 100%",
+        ):
+            calculate_allocation(
+                date(2026, 8, 31)
+            )
+
+    def test_whole_share_quantity_minimizes_error(self):
+        self.assertEqual(
+            choose_share_quantity(
+                shortfall=Decimal("40.00"),
+                share_price=Decimal("29.70"),
+                available_cash=Decimal("100.00"),
+            ),
+            1,
+        )
+
+        self.assertEqual(
+            choose_share_quantity(
+                shortfall=Decimal("80.00"),
+                share_price=Decimal("30.00"),
+                available_cash=Decimal("200.00"),
+            ),
+            3,
+        )
+
+        self.assertEqual(
+            choose_share_quantity(
+                shortfall=Decimal("5.00"),
+                share_price=Decimal("120.00"),
+                available_cash=Decimal("100.00"),
+            ),
+            0,
+        )
+
+        self.assertEqual(
+            choose_share_quantity(
+                shortfall=Decimal("10.00"),
+                share_price=Decimal("30.00"),
+                available_cash=Decimal("100.00"),
+            ),
+            0,
+        )
+
+    def test_existing_schb_holding_redirects_to_vteb(self):
+        contribution = self.add_cash(
+            amount="1000.00"
+        )
+
+        initial = calculate_allocation(
+            date(2026, 8, 31)
+        )
+
+        self.assertEqual(
+            initial.selected.etf,
+            self.etfs["SCHB"],
+        )
+        self.assertEqual(initial.shares, 13)
+
+        recommendation = Recommendation.objects.create(
+            contribution=contribution,
+            etf=self.etfs["SCHB"],
+            action=Recommendation.Action.BUY,
+            status=Recommendation.Status.EXECUTED,
+            available_cash=initial.available_cash,
+            portfolio_value=initial.portfolio_value,
+            current_value=initial.selected.current_value,
+            target_value=initial.selected.target_value,
+            target_shortfall=initial.selected.shortfall,
+            reference_price=Decimal("30.00"),
+            price_date=date(2026, 8, 28),
+            shares=13,
+            estimated_cost=Decimal("390.00"),
+            reason="Test SCHB purchase",
+        )
+
+        purchase_cash = CashTransaction.objects.create(
+            date=date(2026, 8, 31),
+            transaction_type=(
+                CashTransaction.TransactionType.PURCHASE
+            ),
+            amount=Decimal("-390.00"),
+            description="Test purchase",
+        )
+
+        execution = TradeExecution.objects.create(
+            recommendation=recommendation,
+            trade_date=date(2026, 8, 31),
+            etf=self.etfs["SCHB"],
+            shares=13,
+            price_per_share=Decimal("30.00"),
+            fees=Decimal("0.00"),
+            total_cost=Decimal("390.00"),
+            cash_transaction=purchase_cash,
+        )
+
+        HoldingLot.objects.create(
+            execution=execution,
+            etf=self.etfs["SCHB"],
+            purchase_date=date(2026, 8, 31),
+            shares_acquired=13,
+            shares_remaining=13,
+            price_per_share=Decimal("30.00"),
+            total_cost=Decimal("390.00"),
+            compliance_eligible_date=date(
+                2026,
+                9,
+                30,
+            ),
+        )
+
+        contribution.processed = True
+        contribution.save(update_fields=["processed"])
+
+        next_decision = calculate_allocation(
+            date(2026, 8, 31)
+        )
+
+        self.assertEqual(
+            next_decision.portfolio_value,
+            Decimal("1000.00"),
+        )
+        self.assertEqual(
+            next_decision.selected.etf,
+            self.etfs["VTEB"],
+        )
+        self.assertEqual(
+            next_decision.selected.shortfall,
+            Decimal("250.00"),
+        )
+        self.assertEqual(next_decision.shares, 5)
