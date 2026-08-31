@@ -559,3 +559,173 @@ class AllocationServiceTests(TestCase):
             Decimal("250.00"),
         )
         self.assertEqual(next_decision.shares, 5)
+
+
+class RecommendationCommandTests(TestCase):
+    def setUp(self):
+        call_command(
+            "seed_portfolio",
+            stdout=StringIO(),
+        )
+
+        prices = {
+            "SCHB": "30.00",
+            "XMMO": "120.00",
+            "AVUV": "90.00",
+            "VEA": "50.00",
+            "VWO": "40.00",
+            "VTEB": "50.00",
+        }
+
+        self.etfs = {}
+
+        for ticker, value in prices.items():
+            etf = ETF.objects.get(ticker=ticker)
+            self.etfs[ticker] = etf
+
+            PriceHistory.objects.create(
+                etf=etf,
+                date=date(2026, 8, 28),
+                close=Decimal(value),
+                adjusted_close=Decimal(value),
+            )
+
+        call_command(
+            "add_contribution",
+            contribution_date="2026-08-31",
+            amount="100.00",
+            stdout=StringIO(),
+        )
+
+        self.contribution = Contribution.objects.get(
+            sequence_number=1
+        )
+
+    def generate(self):
+        output = StringIO()
+
+        call_command(
+            "generate_recommendation",
+            contribution=1,
+            stdout=output,
+        )
+
+        return output.getvalue()
+
+    def test_command_creates_schb_draft(self):
+        output = self.generate()
+
+        recommendation = Recommendation.objects.get(
+            contribution=self.contribution
+        )
+
+        self.assertEqual(
+            recommendation.etf,
+            self.etfs["SCHB"],
+        )
+        self.assertEqual(
+            recommendation.action,
+            Recommendation.Action.BUY,
+        )
+        self.assertEqual(
+            recommendation.status,
+            Recommendation.Status.DRAFT,
+        )
+        self.assertEqual(
+            recommendation.available_cash,
+            Decimal("100.00"),
+        )
+        self.assertEqual(
+            recommendation.portfolio_value,
+            Decimal("100.00"),
+        )
+        self.assertEqual(
+            recommendation.target_shortfall,
+            Decimal("40.00"),
+        )
+        self.assertEqual(recommendation.shares, 1)
+        self.assertEqual(
+            recommendation.estimated_cost,
+            Decimal("30.00"),
+        )
+
+        self.assertFalse(
+            TradeExecution.objects.exists()
+        )
+        self.assertFalse(
+            HoldingLot.objects.exists()
+        )
+        self.assertFalse(
+            self.contribution.processed
+        )
+
+        self.assertIn(
+            "Created recommendation",
+            output,
+        )
+
+    def test_regenerating_draft_is_idempotent(self):
+        first_output = self.generate()
+        first = Recommendation.objects.get()
+
+        second_output = self.generate()
+        second = Recommendation.objects.get()
+
+        self.assertEqual(first.id, second.id)
+        self.assertEqual(
+            Recommendation.objects.count(),
+            1,
+        )
+        self.assertIn(
+            "Created recommendation",
+            first_output,
+        )
+        self.assertIn(
+            "Updated recommendation",
+            second_output,
+        )
+
+    def test_command_records_hold_cash_without_substitution(
+        self,
+    ):
+        ETF.objects.update(target_percent=0)
+
+        xmmo = self.etfs["XMMO"]
+        xmmo.target_percent = 100
+        xmmo.save(update_fields=["target_percent"])
+
+        self.generate()
+
+        recommendation = Recommendation.objects.get()
+
+        self.assertEqual(recommendation.etf, xmmo)
+        self.assertEqual(
+            recommendation.action,
+            Recommendation.Action.HOLD_CASH,
+        )
+        self.assertEqual(recommendation.shares, 0)
+        self.assertEqual(
+            recommendation.estimated_cost,
+            Decimal("0.00"),
+        )
+        self.assertIn(
+            "no substitute ETF",
+            recommendation.reason,
+        )
+
+    def test_approved_recommendation_cannot_be_regenerated(
+        self,
+    ):
+        self.generate()
+
+        recommendation = Recommendation.objects.get()
+        recommendation.status = (
+            Recommendation.Status.COMPLIANCE_APPROVED
+        )
+        recommendation.save(update_fields=["status"])
+
+        with self.assertRaisesMessage(
+            CommandError,
+            "no longer a draft",
+        ):
+            self.generate()
