@@ -7,8 +7,15 @@ import pandas as pd
 from django.core.management import call_command
 from django.db import IntegrityError, transaction
 from django.test import TestCase
+from django.core.management.base import CommandError
+from django.db.models import Sum
 
-from .models import ETF, PriceHistory
+from .models import (
+    CashTransaction,
+    Contribution,
+    ETF, 
+    PriceHistory,
+)
 
 
 class PortfolioConfigurationTests(TestCase):
@@ -185,4 +192,128 @@ class PriceHistoryTests(TestCase):
         self.assertEqual(
             latest.adjusted_close,
             Decimal("29.900000"),
+        )
+
+class ContributionTests(TestCase):
+    def add_contribution(
+        self,
+        contribution_date="2026-08-31",
+        amount="100.00",
+    ):
+        output = StringIO()
+
+        call_command(
+            "add_contribution",
+            contribution_date=contribution_date,
+            amount=amount,
+            stdout=output,
+        )
+
+        return output.getvalue()
+
+    def test_contribution_creates_shared_cash_deposit(self):
+        output = self.add_contribution()
+
+        contribution = Contribution.objects.get()
+        transaction = CashTransaction.objects.get()
+
+        self.assertEqual(contribution.sequence_number, 1)
+        self.assertEqual(
+            contribution.date,
+            date(2026, 8, 31),
+        )
+        self.assertEqual(
+            contribution.amount,
+            Decimal("100.00"),
+        )
+        self.assertFalse(contribution.processed)
+
+        self.assertEqual(
+            transaction.transaction_type,
+            CashTransaction.TransactionType.DEPOSIT,
+        )
+        self.assertEqual(
+            transaction.amount,
+            Decimal("100.00"),
+        )
+        self.assertEqual(
+            transaction.contribution,
+            contribution,
+        )
+
+        self.assertIn(
+            "Shared cash balance: $100.00",
+            output,
+        )
+
+    def test_contributions_receive_sequential_numbers(self):
+        self.add_contribution(
+            contribution_date="2026-08-24",
+        )
+        self.add_contribution(
+            contribution_date="2026-08-31",
+        )
+
+        sequence_numbers = list(
+            Contribution.objects
+            .order_by("sequence_number")
+            .values_list(
+                "sequence_number",
+                flat=True,
+            )
+        )
+
+        self.assertEqual(sequence_numbers, [1, 2])
+
+    def test_duplicate_date_is_rejected(self):
+        self.add_contribution()
+
+        with self.assertRaisesMessage(
+            CommandError,
+            "already exists",
+        ):
+            self.add_contribution()
+
+        self.assertEqual(
+            Contribution.objects.count(),
+            1,
+        )
+        self.assertEqual(
+            CashTransaction.objects.count(),
+            1,
+        )
+
+    def test_nonpositive_amount_is_rejected(self):
+        with self.assertRaisesMessage(
+            CommandError,
+            "must be positive",
+        ):
+            self.add_contribution(amount="0.00")
+
+        self.assertFalse(
+            Contribution.objects.exists()
+        )
+        self.assertFalse(
+            CashTransaction.objects.exists()
+        )
+
+    def test_all_contributions_share_one_cash_balance(self):
+        self.add_contribution(
+            contribution_date="2026-08-24",
+            amount="100.00",
+        )
+        self.add_contribution(
+            contribution_date="2026-08-31",
+            amount="150.00",
+        )
+
+        shared_cash = (
+            CashTransaction.objects.aggregate(
+                total=Sum("amount")
+            )["total"]
+        )
+
+        self.assertEqual(
+            shared_cash,
+            Decimal("250.00"),
         )
