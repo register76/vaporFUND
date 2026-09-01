@@ -1,9 +1,9 @@
 from django.core.management.base import BaseCommand, CommandError
 
-from portfolio.models import Contribution, Recommendation
-from portfolio.services import (
-    AllocationError,
-    calculate_allocation,
+from portfolio.models import Contribution
+from portfolio.workflows import (
+    WorkflowError,
+    generate_draft_recommendation,
 )
 
 
@@ -46,50 +46,16 @@ class Command(BaseCommand):
                 "No matching unprocessed contribution exists."
             )
 
-        existing = Recommendation.objects.filter(
-            contribution=contribution
-        ).first()
-
-        if (
-            existing
-            and existing.status
-            != Recommendation.Status.DRAFT
-        ):
-            raise CommandError(
-                "The existing recommendation is no longer a draft "
-                "and cannot be regenerated."
-            )
-
         try:
-            decision = calculate_allocation(
-                contribution.date
+            recommendation, decision, created = (
+                generate_draft_recommendation(
+                    contribution
+                )
             )
-        except AllocationError as error:
+        except WorkflowError as error:
             raise CommandError(str(error)) from error
 
         selected = decision.selected
-
-        recommendation, created = (
-            Recommendation.objects.update_or_create(
-                contribution=contribution,
-                defaults={
-                    "etf": selected.etf,
-                    "action": decision.action,
-                    "status": Recommendation.Status.DRAFT,
-                    "available_cash": decision.available_cash,
-                    "portfolio_value": decision.portfolio_value,
-                    "current_value": selected.current_value,
-                    "target_value": selected.target_value,
-                    "target_shortfall": selected.shortfall,
-                    "reference_price": selected.reference_price,
-                    "price_date": selected.price_date,
-                    "shares": decision.shares,
-                    "estimated_cost": decision.estimated_cost,
-                    "reason": decision.reason,
-                },
-            )
-        )
-
         verb = "Created" if created else "Updated"
 
         self.stdout.write(
@@ -150,7 +116,8 @@ class Command(BaseCommand):
         )
         self.stdout.write(
             self.style.WARNING(
-                "Draft recommendation only. Compliance approval "
-                "and manual Merrill execution are required."
+                "Draft recommendation only. Compliance "
+                "approval and manual Merrill execution "
+                "are required."
             )
         )

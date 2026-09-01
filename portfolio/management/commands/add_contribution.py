@@ -2,14 +2,20 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
 from django.db.models import Sum
 
-from portfolio.models import CashTransaction, Contribution
+from portfolio.models import CashTransaction
+from portfolio.workflows import (
+    WorkflowError,
+    create_contribution,
+)
 
 
 class Command(BaseCommand):
-    help = "Add a contribution to the vaporFUND shared cash balance"
+    help = (
+        "Add a contribution to the vaporFUND "
+        "shared cash balance"
+    )
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -24,12 +30,12 @@ class Command(BaseCommand):
             help="Contribution amount",
         )
 
-    @transaction.atomic
     def handle(self, *args, **options):
         try:
             contribution_date = date.fromisoformat(
                 options["contribution_date"]
             )
+
             amount = Decimal(
                 options["amount"]
             ).quantize(
@@ -38,50 +44,13 @@ class Command(BaseCommand):
         except (ValueError, InvalidOperation) as error:
             raise CommandError(str(error)) from error
 
-        if amount <= 0:
-            raise CommandError(
-                "Contribution amount must be positive."
+        try:
+            contribution = create_contribution(
+                contribution_date=contribution_date,
+                amount=amount,
             )
-
-        if Contribution.objects.filter(
-            date=contribution_date
-        ).exists():
-            raise CommandError(
-                f"A contribution already exists for "
-                f"{contribution_date}."
-            )
-
-        previous = (
-            Contribution.objects
-            .select_for_update()
-            .order_by("-sequence_number")
-            .first()
-        )
-
-        sequence_number = (
-            previous.sequence_number + 1
-            if previous
-            else 1
-        )
-
-        contribution = Contribution.objects.create(
-            date=contribution_date,
-            amount=amount,
-            sequence_number=sequence_number,
-        )
-
-        CashTransaction.objects.create(
-            date=contribution_date,
-            transaction_type=(
-                CashTransaction.TransactionType.DEPOSIT
-            ),
-            amount=amount,
-            contribution=contribution,
-            description=(
-                f"Weekly vaporFUND contribution "
-                f"{sequence_number}"
-            ),
-        )
+        except WorkflowError as error:
+            raise CommandError(str(error)) from error
 
         shared_cash = (
             CashTransaction.objects.aggregate(
@@ -92,8 +61,10 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Added contribution {sequence_number}: "
-                f"${amount:.2f} on {contribution_date}"
+                f"Added contribution "
+                f"{contribution.sequence_number}: "
+                f"${contribution.amount:.2f} "
+                f"on {contribution.date}"
             )
         )
         self.stdout.write(
