@@ -220,6 +220,12 @@
                         and manual Merrill execution are required.
                     </p>
                 </div>
+                <a
+                    class="review-link"
+                    href="{% url 'portfolio:recommendation_review' latest_recommendation.contribution.sequence_number %}"
+                >
+                    Review recommendation
+                </a>
             {% else %}
                 <div class="empty-state">
                     <strong>No recommendation yet</strong>

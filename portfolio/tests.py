@@ -1289,3 +1289,85 @@ class DashboardContributionTests(TestCase):
         self.assertFalse(
             Recommendation.objects.exists()
         )
+
+    def test_review_page_displays_stored_recommendation(self):
+        self.post_contribution()
+
+        recommendation = Recommendation.objects.get()
+
+        url = reverse(
+            "portfolio:recommendation_review",
+            args=[
+                recommendation.contribution.sequence_number
+            ],
+        )
+
+        before = {
+            "contributions": Contribution.objects.count(),
+            "transactions": CashTransaction.objects.count(),
+            "recommendations": Recommendation.objects.count(),
+            "executions": TradeExecution.objects.count(),
+            "lots": HoldingLot.objects.count(),
+        }
+
+        response = self.client.get(url)
+
+        after = {
+            "contributions": Contribution.objects.count(),
+            "transactions": CashTransaction.objects.count(),
+            "recommendations": Recommendation.objects.count(),
+            "executions": TradeExecution.objects.count(),
+            "lots": HoldingLot.objects.count(),
+        }
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(
+            response,
+            "portfolio/recommendation_review.html",
+        )
+        self.assertContains(
+            response,
+            "Recommendation review",
+        )
+        self.assertContains(response, "SCHB")
+        self.assertContains(
+            response,
+            "No brokerage action has occurred",
+        )
+        self.assertEqual(before, after)
+
+    def test_review_page_returns_404_for_unknown_contribution(self):
+        url = reverse(
+            "portfolio:recommendation_review",
+            args=[999],
+        )
+
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_review_page_rejects_post_requests(self):
+        self.post_contribution()
+
+        recommendation = Recommendation.objects.get()
+
+        url = reverse(
+            "portfolio:recommendation_review",
+            args=[
+                recommendation.contribution.sequence_number
+            ],
+        )
+
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 405)
+        self.assertFalse(
+            TradeExecution.objects.exists()
+        )
+        self.assertFalse(
+            HoldingLot.objects.exists()
+        )
+        self.assertEqual(
+            recommendation.status,
+            Recommendation.Status.DRAFT,
+        )

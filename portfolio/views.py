@@ -2,8 +2,14 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib import messages
+from django.views.decorators.http import require_GET
+
 from django.db.models import Sum
-from django.shortcuts import redirect, render
+from django.shortcuts import (
+    get_object_or_404,
+    redirect, 
+    render,
+)
 
 from .forms import ContributionForm
 
@@ -263,5 +269,39 @@ def dashboard(request):
     return render(
         request,
         "portfolio/dashboard.html",
+        context,
+    )
+
+@require_GET
+def recommendation_review(
+    request,
+    sequence_number,
+):
+    recommendation = get_object_or_404(
+        Recommendation.objects.select_related(
+            "contribution",
+            "etf",
+        ),
+        contribution__sequence_number=sequence_number,
+    )
+
+    estimated_remaining_cash = (
+        recommendation.available_cash
+        - recommendation.estimated_cost
+    ).quantize(
+        Decimal("0.01")
+    )
+
+    context = {
+        "recommendation": recommendation,
+        "contribution": recommendation.contribution,
+        "estimated_remaining_cash": (
+            estimated_remaining_cash
+        ),
+    }
+
+    return render(
+        request,
+        "portfolio/recommendation_review.html",
         context,
     )

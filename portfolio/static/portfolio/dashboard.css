@@ -554,7 +554,72 @@ tbody tr:last-child td {
     font-size: 0.8rem;
 }
 
+.review-hero {
+    border-color: rgba(75, 230, 165, 0.35);
+}
+
+.audit-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    gap: 12px;
+}
+
+.audit-grid p {
+    margin: 5px 0 0;
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+
+.review-reason {
+    margin-top: 20px;
+    padding: 18px;
+    border-left: 3px solid var(--green);
+    border-radius: 0 10px 10px 0;
+    background: var(--panel-alt);
+}
+
+.safety-panel {
+    border-color: rgba(255, 216, 77, 0.35);
+}
+
+.safety-panel h2 {
+    margin: 0 0 12px;
+}
+
+.safety-panel ul {
+    margin: 0;
+    padding-left: 22px;
+    color: var(--muted);
+}
+
+.safety-panel li + li {
+    margin-top: 6px;
+}
+
+.review-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 18px;
+    padding: 9px 15px;
+    border: 1px solid var(--green);
+    border-radius: 9px;
+    color: var(--green);
+    font-weight: 750;
+    text-decoration: none;
+}
+
+.review-link:hover {
+    background: rgba(75, 230, 165, 0.1);
+}
+
+
 @media (max-width: 1000px) {
+
+    .audit-grid {
+        grid-template-columns: 1fr;
+    }
+
     .summary-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
