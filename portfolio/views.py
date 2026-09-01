@@ -2,7 +2,10 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib import messages
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import (
+    require_GET,
+    require_http_methods,
+)
 
 from django.db.models import Sum
 from django.shortcuts import (
@@ -11,7 +14,10 @@ from django.shortcuts import (
     render,
 )
 
-from .forms import ContributionForm
+from .forms import (
+    ApprovalConfirmationForm,
+    ContributionForm,
+)
 
 from .models import (
     CashTransaction,
@@ -28,6 +34,7 @@ from .services import (
 from .workflows import (
     WorkflowError,
     add_contribution_and_recommend,
+    approve_recommendation as approve_recommendation_workflow,
 )
 
 def dashboard(request):
@@ -303,5 +310,64 @@ def recommendation_review(
     return render(
         request,
         "portfolio/recommendation_review.html",
+        context,
+    )
+
+@require_http_methods(["GET", "POST"])
+def recommendation_approve(
+    request,
+    sequence_number,
+):
+    recommendation = get_object_or_404(
+        Recommendation.objects.select_related(
+            "contribution",
+            "etf",
+        ),
+        contribution__sequence_number=sequence_number,
+    )
+
+    if request.method == "POST":
+        approval_form = ApprovalConfirmationForm(
+            request.POST
+        )
+
+        if approval_form.is_valid():
+            try:
+                recommendation = (
+                    approve_recommendation_workflow(
+                        sequence_number=sequence_number
+                    )
+                )
+            except WorkflowError as error:
+                messages.error(
+                    request,
+                    str(error),
+                )
+            else:
+                messages.success(
+                    request,
+                    (
+                        f"Contribution {sequence_number} "
+                        f"was compliance-approved. "
+                        f"No brokerage order was placed."
+                    ),
+                )
+
+                return redirect(
+                    "portfolio:recommendation_review",
+                    sequence_number=sequence_number,
+                )
+    else:
+        approval_form = ApprovalConfirmationForm()
+
+    context = {
+        "recommendation": recommendation,
+        "contribution": recommendation.contribution,
+        "approval_form": approval_form,
+    }
+
+    return render(
+        request,
+        "portfolio/recommendation_approve.html",
         context,
     )

@@ -36,6 +36,16 @@
         </a>
     </header>
 
+{% if messages %}
+    <div class="message-list">
+        {% for message in messages %}
+            <div class="message-banner {{ message.tags }}">
+                {{ message }}
+            </div>
+        {% endfor %}
+    </div>
+{% endif %}
+
     <main>
         <section class="panel review-hero">
             <div class="panel-header">
@@ -124,6 +134,14 @@
                     </strong>
                 </div>
             </div>
+            {% if recommendation.status == "DRAFT" and recommendation.action == "BUY" %}
+                <a
+                    class="approval-link"
+                    href="{% url 'portfolio:recommendation_approve' contribution.sequence_number %}"
+                >
+                    Continue to approval
+                </a>
+            {% endif %}
         </section>
 
         <section class="panel">

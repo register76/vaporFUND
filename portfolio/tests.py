@@ -1371,3 +1371,217 @@ class DashboardContributionTests(TestCase):
             recommendation.status,
             Recommendation.Status.DRAFT,
         )
+
+    def approval_url(self):
+        recommendation = Recommendation.objects.get()
+
+        return reverse(
+            "portfolio:recommendation_approve",
+            args=[
+                recommendation.contribution.sequence_number
+            ],
+        )
+
+    def test_approval_page_is_read_only_on_get(self):
+        self.post_contribution()
+
+        recommendation = Recommendation.objects.get()
+        cash_before = CashTransaction.objects.count()
+
+        response = self.client.get(
+            self.approval_url()
+        )
+
+        recommendation.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(
+            response,
+            "portfolio/recommendation_approve.html",
+        )
+        self.assertContains(
+            response,
+            "Approve this recommendation?",
+        )
+        self.assertEqual(
+            recommendation.status,
+            Recommendation.Status.DRAFT,
+        )
+        self.assertEqual(
+            CashTransaction.objects.count(),
+            cash_before,
+        )
+        self.assertFalse(
+            TradeExecution.objects.exists()
+        )
+        self.assertFalse(
+            HoldingLot.objects.exists()
+        )
+
+    def test_approval_requires_confirmation_checkbox(self):
+        self.post_contribution()
+
+        recommendation = Recommendation.objects.get()
+
+        response = self.client.post(
+            self.approval_url(),
+            {},
+        )
+
+        recommendation.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "This field is required.",
+        )
+        self.assertEqual(
+            recommendation.status,
+            Recommendation.Status.DRAFT,
+        )
+        self.assertFalse(
+            TradeExecution.objects.exists()
+        )
+        self.assertFalse(
+            HoldingLot.objects.exists()
+        )
+
+    def test_confirmed_web_approval_changes_only_status(self):
+        self.post_contribution()
+
+        recommendation = Recommendation.objects.get()
+
+        transaction_count = (
+            CashTransaction.objects.count()
+        )
+        cash_total = (
+            CashTransaction.objects.aggregate(
+                total=Sum("amount")
+            )["total"]
+        )
+
+        response = self.client.post(
+            self.approval_url(),
+            {
+                "confirm_approval": "on",
+            },
+            follow=True,
+        )
+
+        recommendation.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            recommendation.status,
+            Recommendation.Status.COMPLIANCE_APPROVED,
+        )
+        self.assertContains(
+            response,
+            "No brokerage order was placed",
+        )
+        self.assertEqual(
+            CashTransaction.objects.count(),
+            transaction_count,
+        )
+        self.assertEqual(
+            CashTransaction.objects.aggregate(
+                total=Sum("amount")
+            )["total"],
+            cash_total,
+        )
+        self.assertFalse(
+            TradeExecution.objects.exists()
+        )
+        self.assertFalse(
+            HoldingLot.objects.exists()
+        )
+
+    def test_web_approval_cannot_be_repeated(self):
+        self.post_contribution()
+
+        url = self.approval_url()
+
+        first_response = self.client.post(
+            url,
+            {
+                "confirm_approval": "on",
+            },
+            follow=True,
+        )
+
+        second_response = self.client.post(
+            url,
+            {
+                "confirm_approval": "on",
+            },
+            follow=True,
+        )
+
+        recommendation = Recommendation.objects.get()
+
+        self.assertEqual(
+            first_response.status_code,
+            200,
+        )
+        self.assertEqual(
+            second_response.status_code,
+            200,
+        )
+        self.assertContains(
+            second_response,
+            "Only a draft recommendation can be approved.",
+        )
+        self.assertEqual(
+            recommendation.status,
+            Recommendation.Status.COMPLIANCE_APPROVED,
+        )
+        self.assertFalse(
+            TradeExecution.objects.exists()
+        )
+        self.assertFalse(
+            HoldingLot.objects.exists()
+        )
+
+    def test_hold_cash_cannot_be_web_approved(self):
+        self.post_contribution()
+
+        recommendation = Recommendation.objects.get()
+        recommendation.action = (
+            Recommendation.Action.HOLD_CASH
+        )
+        recommendation.shares = 0
+        recommendation.estimated_cost = Decimal("0.00")
+        recommendation.save(
+            update_fields=[
+                "action",
+                "shares",
+                "estimated_cost",
+                "updated_at",
+            ]
+        )
+
+        response = self.client.post(
+            self.approval_url(),
+            {
+                "confirm_approval": "on",
+            },
+            follow=True,
+        )
+
+        recommendation.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "A hold-cash recommendation has no purchase to approve.",
+        )
+        self.assertEqual(
+            recommendation.status,
+            Recommendation.Status.DRAFT,
+        )
+        self.assertFalse(
+            TradeExecution.objects.exists()
+        )
+        self.assertFalse(
+            HoldingLot.objects.exists()
+        )

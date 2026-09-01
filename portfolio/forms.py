@@ -27,3 +27,13 @@ class ContributionForm(forms.Form):
             }
         ),
     )
+
+class ApprovalConfirmationForm(forms.Form):
+    confirm_approval = forms.BooleanField(
+        label=(
+            "I have reviewed this recommendation and "
+            "authorize it for manual execution."
+        ),
+        required=True,
+    )
+

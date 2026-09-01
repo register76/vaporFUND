@@ -16,4 +16,9 @@ urlpatterns = [
         views.recommendation_review,
         name="recommendation_review",
     ),
+    path(
+        "recommendations/<int:sequence_number>/approve/",
+        views.recommendation_approve,
+        name="recommendation_approve",
+    ),
 ]

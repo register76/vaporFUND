@@ -614,6 +614,105 @@ tbody tr:last-child td {
 }
 
 
+.approval-panel {
+    max-width: 950px;
+    width: 100%;
+    margin-inline: auto;
+    border-color: rgba(255, 216, 77, 0.4);
+}
+
+.approval-warning {
+    margin: 22px 0;
+    padding: 18px;
+    border: 1px solid rgba(255, 216, 77, 0.35);
+    border-radius: 10px;
+    background: rgba(255, 216, 77, 0.06);
+}
+
+.approval-warning strong {
+    color: var(--yellow);
+}
+
+.approval-warning p {
+    margin: 5px 0 15px;
+    color: var(--muted);
+}
+
+.approval-warning p:last-child {
+    margin-bottom: 0;
+}
+
+.approval-form {
+    margin-top: 22px;
+}
+
+.confirmation-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 11px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel-alt);
+    cursor: pointer;
+}
+
+.confirmation-check input {
+    width: 18px;
+    height: 18px;
+    margin-top: 2px;
+    accent-color: var(--green);
+}
+
+.confirmation-check span {
+    color: var(--text);
+    font-weight: 650;
+}
+
+.approval-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 18px;
+}
+
+.secondary-button,
+.approval-button,
+.approval-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 9px 16px;
+    border-radius: 9px;
+    font: inherit;
+    font-weight: 750;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.secondary-button {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+}
+
+.approval-button,
+.approval-link {
+    border: 1px solid var(--yellow);
+    background: rgba(255, 216, 77, 0.1);
+    color: var(--yellow);
+}
+
+.approval-link {
+    margin-top: 20px;
+}
+
+.approval-button:hover,
+.approval-link:hover {
+    background: rgba(255, 216, 77, 0.18);
+}
+
 @media (max-width: 1000px) {
 
     .audit-grid {
@@ -687,5 +786,14 @@ tbody tr:last-child td {
 
     .primary-button {
         grid-column: 1 / -1;
+    }
+
+    .approval-actions {
+        flex-direction: column-reverse;
+    }
+
+    .secondary-button,
+    .approval-button {
+        width: 100%;
     }
 }
