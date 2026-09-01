@@ -28,6 +28,16 @@
         </a>
     </header>
 
+{% if messages %}
+    <div class="message-list">
+        {% for message in messages %}
+            <div class="message-banner {{ message.tags }}">
+                {{ message }}
+            </div>
+        {% endfor %}
+    </div>
+{% endif %}
+
     <main>
         <section class="summary-grid">
             <article class="summary-card">
@@ -80,6 +90,63 @@
                     </p>
                 {% endif %}
             </article>
+        </section>
+
+        <section class="panel contribution-panel">
+            <div class="panel-header">
+                <div>
+                    <p class="section-label">Weekly workflow</p>
+                    <h2>Add contribution</h2>
+                    <p class="panel-note">
+                        Add funds to shared cash and generate a draft
+                        target-allocation recommendation.
+                    </p>
+                </div>
+            </div>
+
+            <form method="post" class="contribution-form">
+                {% csrf_token %}
+
+                <div class="form-field">
+                    <label for="{{ contribution_form.contribution_date.id_for_label }}">
+                        {{ contribution_form.contribution_date.label }}
+                    </label>
+
+                    {{ contribution_form.contribution_date }}
+
+                    {% for error in contribution_form.contribution_date.errors %}
+                        <p class="field-error">{{ error }}</p>
+                    {% endfor %}
+                </div>
+
+                <div class="form-field">
+                    <label for="{{ contribution_form.amount.id_for_label }}">
+                        {{ contribution_form.amount.label }}
+                    </label>
+
+                    <div class="money-input">
+                        <span>$</span>
+                        {{ contribution_form.amount }}
+                    </div>
+
+                    {% for error in contribution_form.amount.errors %}
+                        <p class="field-error">{{ error }}</p>
+                    {% endfor %}
+                </div>
+
+                {% for error in contribution_form.non_field_errors %}
+                    <p class="field-error">{{ error }}</p>
+                {% endfor %}
+
+                <button type="submit" class="primary-button">
+                    Add contribution &amp; generate recommendation
+                </button>
+            </form>
+
+            <p class="form-safety-note">
+                This creates a draft recommendation only. It does not approve
+                or place a brokerage order.
+            </p>
         </section>
 
         <section class="panel recommendation-panel">

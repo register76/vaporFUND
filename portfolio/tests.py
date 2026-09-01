@@ -9,6 +9,7 @@ from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.core.management.base import CommandError
 from django.db.models import Sum
+from django.urls import reverse
 
 from .models import (
     CashTransaction,
@@ -1042,4 +1043,249 @@ class PurchaseConfirmationTests(TestCase):
         self.assertEqual(
             HoldingLot.objects.count(),
             1,
+        )
+
+
+class DashboardContributionTests(TestCase):
+    def setUp(self):
+        targets = [
+            (
+                "SCHB",
+                "Schwab U.S. Broad Market ETF",
+                ETF.AssetClass.STOCK,
+                40,
+                "30.00",
+            ),
+            (
+                "XMMO",
+                "Invesco S&P MidCap Momentum ETF",
+                ETF.AssetClass.STOCK,
+                5,
+                "120.00",
+            ),
+            (
+                "AVUV",
+                "Avantis U.S. Small Cap Value ETF",
+                ETF.AssetClass.STOCK,
+                10,
+                "100.00",
+            ),
+            (
+                "VEA",
+                "Vanguard FTSE Developed Markets ETF",
+                ETF.AssetClass.STOCK,
+                15,
+                "55.00",
+            ),
+            (
+                "VWO",
+                "Vanguard FTSE Emerging Markets ETF",
+                ETF.AssetClass.STOCK,
+                5,
+                "50.00",
+            ),
+            (
+                "VTEB",
+                "Vanguard Tax-Exempt Bond ETF",
+                ETF.AssetClass.BOND,
+                25,
+                "50.00",
+            ),
+        ]
+
+        self.etfs = {}
+
+        for ticker, name, asset_class, target, price in targets:
+            etf = ETF.objects.create(
+                ticker=ticker,
+                name=name,
+                asset_class=asset_class,
+                target_percent=target,
+                enabled=True,
+            )
+
+            PriceHistory.objects.create(
+                etf=etf,
+                date=date(2026, 8, 31),
+                close=Decimal(price),
+                adjusted_close=Decimal(price),
+            )
+
+            self.etfs[ticker] = etf
+
+        self.url = reverse(
+            "portfolio:dashboard"
+        )
+
+    def post_contribution(
+        self,
+        contribution_date="2026-09-01",
+        amount="100.00",
+        follow=True,
+    ):
+        return self.client.post(
+            self.url,
+            {
+                "contribution_date": contribution_date,
+                "amount": amount,
+            },
+            follow=follow,
+        )
+
+    def test_dashboard_displays_contribution_form(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Add contribution",
+        )
+        self.assertContains(
+            response,
+            "generate recommendation",
+        )
+
+    def test_post_creates_contribution_deposit_and_draft(self):
+        response = self.post_contribution()
+
+        self.assertEqual(response.status_code, 200)
+
+        contribution = Contribution.objects.get()
+        transaction = CashTransaction.objects.get()
+        recommendation = Recommendation.objects.get()
+
+        self.assertEqual(
+            contribution.date,
+            date(2026, 9, 1),
+        )
+        self.assertEqual(
+            contribution.amount,
+            Decimal("100.00"),
+        )
+        self.assertEqual(
+            contribution.sequence_number,
+            1,
+        )
+        self.assertFalse(contribution.processed)
+
+        self.assertEqual(
+            transaction.amount,
+            Decimal("100.00"),
+        )
+        self.assertEqual(
+            transaction.transaction_type,
+            CashTransaction.TransactionType.DEPOSIT,
+        )
+        self.assertEqual(
+            transaction.contribution,
+            contribution,
+        )
+
+        self.assertEqual(
+            recommendation.contribution,
+            contribution,
+        )
+        self.assertEqual(
+            recommendation.status,
+            Recommendation.Status.DRAFT,
+        )
+        self.assertEqual(
+            recommendation.action,
+            Recommendation.Action.BUY,
+        )
+        self.assertEqual(
+            recommendation.etf,
+            self.etfs["SCHB"],
+        )
+        self.assertEqual(recommendation.shares, 1)
+        self.assertEqual(
+            recommendation.estimated_cost,
+            Decimal("30.00"),
+        )
+
+        self.assertFalse(
+            TradeExecution.objects.exists()
+        )
+        self.assertFalse(
+            HoldingLot.objects.exists()
+        )
+
+        self.assertContains(
+            response,
+            "Draft recommendation: buy 1 SCHB",
+        )
+
+    def test_zero_amount_is_rejected_by_server(self):
+        response = self.post_contribution(
+            amount="0.00",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Ensure this value is greater than or equal to 0.01",
+        )
+
+        self.assertFalse(
+            Contribution.objects.exists()
+        )
+        self.assertFalse(
+            CashTransaction.objects.exists()
+        )
+        self.assertFalse(
+            Recommendation.objects.exists()
+        )
+
+    def test_duplicate_date_is_rejected(self):
+        first_response = self.post_contribution()
+        second_response = self.post_contribution()
+
+        self.assertEqual(
+            first_response.status_code,
+            200,
+        )
+        self.assertEqual(
+            second_response.status_code,
+            200,
+        )
+
+        self.assertContains(
+            second_response,
+            "A contribution already exists for 2026-09-01",
+        )
+
+        self.assertEqual(
+            Contribution.objects.count(),
+            1,
+        )
+        self.assertEqual(
+            CashTransaction.objects.count(),
+            1,
+        )
+        self.assertEqual(
+            Recommendation.objects.count(),
+            1,
+        )
+
+    def test_failure_to_generate_rolls_back_deposit(self):
+        PriceHistory.objects.filter(
+            etf=self.etfs["VTEB"]
+        ).delete()
+
+        response = self.post_contribution()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "No price exists for VTEB",
+        )
+
+        self.assertFalse(
+            Contribution.objects.exists()
+        )
+        self.assertFalse(
+            CashTransaction.objects.exists()
+        )
+        self.assertFalse(
+            Recommendation.objects.exists()
         )

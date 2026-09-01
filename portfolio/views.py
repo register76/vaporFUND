@@ -1,8 +1,11 @@
 from datetime import date
 from decimal import Decimal
 
+from django.contrib import messages
 from django.db.models import Sum
-from django.shortcuts import render
+from django.shortcuts import redirect, render
+
+from .forms import ContributionForm
 
 from .models import (
     CashTransaction,
@@ -16,9 +19,63 @@ from .services import (
     calculate_allocation,
     latest_price,
 )
-
+from .workflows import (
+    WorkflowError,
+    add_contribution_and_recommend,
+)
 
 def dashboard(request):
+    if request.method == "POST":
+        contribution_form = ContributionForm(
+            request.POST
+        )
+
+        if contribution_form.is_valid():
+            try:
+                contribution, recommendation, decision = (
+                    add_contribution_and_recommend(
+                        contribution_date=(
+                            contribution_form.cleaned_data[
+                                "contribution_date"
+                            ]
+                        ),
+                        amount=(
+                            contribution_form.cleaned_data[
+                                "amount"
+                            ]
+                        ),
+                    )
+                )
+            except WorkflowError as error:
+                messages.error(
+                    request,
+                    str(error),
+                )
+            else:
+                if recommendation.action == "BUY":
+                    result = (
+                        f"Contribution "
+                        f"{contribution.sequence_number} added. "
+                        f"Draft recommendation: buy "
+                        f"{recommendation.shares} "
+                        f"{recommendation.etf.ticker}."
+                    )
+                else:
+                    result = (
+                        f"Contribution "
+                        f"{contribution.sequence_number} added. "
+                        f"The recommendation is to hold cash."
+                    )
+
+                messages.success(
+                    request,
+                    result,
+                )
+
+                return redirect(request.path)
+    else:
+        contribution_form = ContributionForm()
+
     as_of_date = date.today()
 
     cash_balance = (
@@ -200,6 +257,7 @@ def dashboard(request):
         "contributions": contributions,
         "holdings": holdings,
         "configured_targets": configured_targets,
+        "contribution_form": contribution_form,
     }
 
     return render(
