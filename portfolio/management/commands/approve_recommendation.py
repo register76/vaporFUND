@@ -1,11 +1,16 @@
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
 
-from portfolio.models import Recommendation
+from portfolio.workflows import (
+    WorkflowError,
+    approve_recommendation,
+)
 
 
 class Command(BaseCommand):
-    help = "Mark a vaporFUND buy recommendation as compliance-approved"
+    help = (
+        "Mark a vaporFUND buy recommendation "
+        "as compliance-approved"
+    )
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -15,59 +20,15 @@ class Command(BaseCommand):
             help="Contribution sequence number",
         )
 
-    @transaction.atomic
     def handle(self, *args, **options):
         sequence_number = options["contribution"]
 
-        recommendation = (
-            Recommendation.objects
-            .select_for_update()
-            .select_related(
-                "contribution",
-                "etf",
+        try:
+            recommendation = approve_recommendation(
+                sequence_number=sequence_number
             )
-            .filter(
-                contribution__sequence_number=sequence_number
-            )
-            .first()
-        )
-
-        if not recommendation:
-            raise CommandError(
-                f"No recommendation exists for contribution "
-                f"{sequence_number}."
-            )
-
-        if recommendation.status != (
-            Recommendation.Status.DRAFT
-        ):
-            raise CommandError(
-                "Only a draft recommendation can be approved."
-            )
-
-        if recommendation.action != (
-            Recommendation.Action.BUY
-        ):
-            raise CommandError(
-                "A hold-cash recommendation has no purchase "
-                "to approve."
-            )
-
-        if recommendation.shares <= 0:
-            raise CommandError(
-                "The recommendation does not contain a "
-                "positive share quantity."
-            )
-
-        recommendation.status = (
-            Recommendation.Status.COMPLIANCE_APPROVED
-        )
-        recommendation.save(
-            update_fields=[
-                "status",
-                "updated_at",
-            ]
-        )
+        except WorkflowError as error:
+            raise CommandError(str(error)) from error
 
         self.stdout.write(
             self.style.SUCCESS(

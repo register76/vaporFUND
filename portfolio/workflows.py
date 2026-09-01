@@ -153,3 +153,61 @@ def add_contribution_and_recommend(
     )
 
     return contribution, recommendation, decision
+
+
+@transaction.atomic
+def approve_recommendation(
+    sequence_number,
+):
+    recommendation = (
+        Recommendation.objects
+        .select_for_update()
+        .select_related(
+            "contribution",
+            "etf",
+        )
+        .filter(
+            contribution__sequence_number=sequence_number
+        )
+        .first()
+    )
+
+    if not recommendation:
+        raise WorkflowError(
+            f"No recommendation exists for contribution "
+            f"{sequence_number}."
+        )
+
+    if recommendation.status != (
+        Recommendation.Status.DRAFT
+    ):
+        raise WorkflowError(
+            "Only a draft recommendation can be approved."
+        )
+
+    if recommendation.action != (
+        Recommendation.Action.BUY
+    ):
+        raise WorkflowError(
+            "A hold-cash recommendation has no purchase "
+            "to approve."
+        )
+
+    if recommendation.shares <= 0:
+        raise WorkflowError(
+            "The recommendation does not contain a "
+            "positive share quantity."
+        )
+
+    recommendation.status = (
+        Recommendation.Status.COMPLIANCE_APPROVED
+    )
+
+    recommendation.save(
+        update_fields=[
+            "status",
+            "updated_at",
+        ]
+    )
+
+    return recommendation
