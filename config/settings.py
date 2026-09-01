@@ -25,7 +25,12 @@ SECRET_KEY = 'django-insecure-cs*ui$yll%c%^c7nk7kfmbp14qzcipb$%+i6sh)=0*^^&0zbe$
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    "vaporfund.local",
+    "192.168.1.20",
+    "127.0.0.1",
+    "localhost",
+]
 
 
 # Application definition

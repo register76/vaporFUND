@@ -1,0 +1,419 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+    <title>vaporFUND</title>
+    <link
+        rel="stylesheet"
+        href="{% static 'portfolio/dashboard.css' %}"
+    >
+</head>
+<body>
+    <header class="site-header">
+        <div>
+            <p class="eyebrow">VAPORWARE LABS</p>
+            <h1>vapor<span>FUND</span></h1>
+            <p class="subtitle">
+                Buy-only portfolio allocation · $100 per week
+            </p>
+        </div>
+
+        <a class="admin-link" href="/admin/">
+            Django Admin
+        </a>
+    </header>
+
+    <main>
+        <section class="summary-grid">
+            <article class="summary-card">
+                <p class="label">Portfolio value</p>
+                <p class="metric">
+                    ${{ portfolio_value|floatformat:2 }}
+                </p>
+                <p class="detail">
+                    Holdings
+                    ${{ total_holding_value|floatformat:2 }}
+                    · Cash
+                    ${{ cash_balance|floatformat:2 }}
+                </p>
+            </article>
+
+            <article class="summary-card">
+                <p class="label">Shared cash</p>
+                <p class="metric">
+                    ${{ cash_balance|floatformat:2 }}
+                </p>
+                <p class="detail">
+                    {{ cash_percent|floatformat:1 }}%
+                    currently uninvested
+                </p>
+            </article>
+
+            <article class="summary-card">
+                <p class="label">Allocation policy</p>
+                <p class="metric">75/25</p>
+                <p class="detail">
+                    Stocks / municipal bonds
+                </p>
+            </article>
+
+            <article class="summary-card accent">
+                <p class="label">Next priority</p>
+
+                {% if next_priority %}
+                    <p class="metric">
+                        {{ next_priority.etf.ticker }}
+                    </p>
+                    <p class="detail">
+                        ${{ next_priority.shortfall|floatformat:2 }}
+                        target shortfall
+                    </p>
+                {% else %}
+                    <p class="metric">Awaiting funds</p>
+                    <p class="detail">
+                        Add a contribution to begin
+                    </p>
+                {% endif %}
+            </article>
+        </section>
+
+        <section class="panel recommendation-panel">
+            <div class="panel-heading">
+                <div>
+                    <p class="eyebrow">LATEST DECISION</p>
+                    <h2>Contribution recommendation</h2>
+                </div>
+
+                {% if latest_recommendation %}
+                    <span class="status">
+                        {{ latest_recommendation.get_status_display }}
+                    </span>
+                {% endif %}
+            </div>
+
+            {% if latest_recommendation %}
+                <div class="recommendation">
+                    <div class="recommendation-action">
+                        <span class="action">
+                            {{ latest_recommendation.get_action_display }}
+                        </span>
+
+                        <strong>
+                            {% if latest_recommendation.shares %}
+                                {{ latest_recommendation.shares }}
+                                {{ latest_recommendation.etf.ticker }}
+                            {% else %}
+                                for
+                                {{ latest_recommendation.etf.ticker }}
+                            {% endif %}
+                        </strong>
+                    </div>
+
+                    <dl class="decision-details">
+                        <div>
+                            <dt>Contribution</dt>
+                            <dd>
+                                #{{ latest_recommendation.contribution.sequence_number }}
+                            </dd>
+                        </div>
+
+                        <div>
+                            <dt>Shared cash</dt>
+                            <dd>
+                                ${{ latest_recommendation.available_cash|floatformat:2 }}
+                            </dd>
+                        </div>
+
+                        <div>
+                            <dt>Reference price</dt>
+                            <dd>
+                                ${{ latest_recommendation.reference_price|floatformat:2 }}
+                            </dd>
+                        </div>
+
+                        <div>
+                            <dt>Estimated cost</dt>
+                            <dd>
+                                ${{ latest_recommendation.estimated_cost|floatformat:2 }}
+                            </dd>
+                        </div>
+                    </dl>
+
+                    <p class="reason">
+                        {{ latest_recommendation.reason }}
+                    </p>
+
+                    <p class="warning">
+                        Draft recommendation only. Compliance approval
+                        and manual Merrill execution are required.
+                    </p>
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <strong>No recommendation yet</strong>
+                    <p>
+                        Record the first contribution, then generate
+                        a target-allocation recommendation.
+                    </p>
+                </div>
+            {% endif %}
+        </section>
+
+        <section class="panel allocation-panel">
+            <div class="panel-heading">
+                <div>
+                    <p class="eyebrow">TARGET ALLOCATION</p>
+                    <h2>Portfolio alignment</h2>
+                </div>
+
+                <span class="period">
+                    As of {{ as_of_date }}
+                </span>
+            </div>
+
+            {% if allocation_error %}
+                <p class="error-message">
+                    {{ allocation_error }}
+                </p>
+            {% endif %}
+
+            <div class="allocation-summary">
+                <div>
+                    <span>Stocks</span>
+                    <strong>
+                        {{ stock_percent|floatformat:1 }}%
+                    </strong>
+                    <small>75% target</small>
+                </div>
+
+                <div>
+                    <span>Municipal bonds</span>
+                    <strong>
+                        {{ bond_percent|floatformat:1 }}%
+                    </strong>
+                    <small>25% target</small>
+                </div>
+
+                <div>
+                    <span>Uninvested cash</span>
+                    <strong>
+                        {{ cash_percent|floatformat:1 }}%
+                    </strong>
+                    <small>
+                        ${{ cash_balance|floatformat:2 }}
+                    </small>
+                </div>
+            </div>
+
+            <div class="allocation-list">
+                {% if allocation_rows %}
+                    {% for row in allocation_rows %}
+                        <article class="allocation-row">
+                            <div class="allocation-heading">
+                                <div>
+                                    <strong>
+                                        {{ row.etf.ticker }}
+                                    </strong>
+                                    <span>
+                                        {{ row.etf.name }}
+                                    </span>
+                                </div>
+
+                                <div class="allocation-percentages">
+                                    <strong>
+                                        {{ row.actual_percent|floatformat:1 }}%
+                                    </strong>
+                                    <span>
+                                        / {{ row.target_percent }}%
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div class="allocation-track">
+                                <div
+                                    class="allocation-fill"
+                                    style="width: {{ row.actual_percent|floatformat:2 }}%;"
+                                ></div>
+                                <div
+                                    class="target-marker"
+                                    style="left: {{ row.target_percent }}%;"
+                                ></div>
+                            </div>
+
+                            <div class="allocation-details">
+                                <span>
+                                    Current
+                                    ${{ row.current_value|floatformat:2 }}
+                                </span>
+
+                                <span>
+                                    Target
+                                    ${{ row.target_value|floatformat:2 }}
+                                </span>
+
+                                {% if row.shortfall > 0 %}
+                                    <span class="underweight">
+                                        Underweight
+                                        ${{ row.shortfall|floatformat:2 }}
+                                    </span>
+                                {% elif row.shortfall < 0 %}
+                                    <span class="overweight">
+                                        Overweight
+                                        ${{ row.shortfall|floatformat:2 }}
+                                    </span>
+                                {% else %}
+                                    <span class="aligned">
+                                        On target
+                                    </span>
+                                {% endif %}
+                            </div>
+                        </article>
+                    {% endfor %}
+                {% else %}
+                    {% for etf in configured_targets %}
+                        <article class="allocation-row">
+                            <div class="allocation-heading">
+                                <div>
+                                    <strong>{{ etf.ticker }}</strong>
+                                    <span>{{ etf.name }}</span>
+                                </div>
+
+                                <div class="allocation-percentages">
+                                    <strong>0.0%</strong>
+                                    <span>
+                                        / {{ etf.target_percent }}%
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div class="allocation-track">
+                                <div
+                                    class="target-marker"
+                                    style="left: {{ etf.target_percent }}%;"
+                                ></div>
+                            </div>
+
+                            <div class="allocation-details">
+                                <span>Current $0.00</span>
+                                <span>Awaiting contribution</span>
+                                <span class="underweight">
+                                    {{ etf.target_percent }}% target
+                                </span>
+                            </div>
+                        </article>
+                    {% endfor %}
+                {% endif %}
+            </div>
+        </section>
+
+        <div class="content-grid">
+            <section class="panel">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">CASH FLOW</p>
+                        <h2>Recent contributions</h2>
+                    </div>
+                </div>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Date</th>
+                                <th>Amount</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for contribution in contributions %}
+                                <tr>
+                                    <td>
+                                        {{ contribution.sequence_number }}
+                                    </td>
+                                    <td>{{ contribution.date }}</td>
+                                    <td>
+                                        ${{ contribution.amount|floatformat:2 }}
+                                    </td>
+                                    <td>
+                                        {% if contribution.processed %}
+                                            <span class="pass">
+                                                Processed
+                                            </span>
+                                        {% else %}
+                                            <span class="pending">
+                                                Pending
+                                            </span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% empty %}
+                                <tr>
+                                    <td colspan="4">
+                                        No contributions recorded.
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">PORTFOLIO</p>
+                        <h2>Current holdings</h2>
+                    </div>
+                </div>
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ETF</th>
+                                <th>Shares</th>
+                                <th>Price</th>
+                                <th>Market value</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for holding in holdings %}
+                                <tr>
+                                    <td>
+                                        <strong>
+                                            {{ holding.ticker }}
+                                        </strong>
+                                    </td>
+                                    <td>{{ holding.shares }}</td>
+                                    <td>
+                                        ${{ holding.reference_price|floatformat:2 }}
+                                    </td>
+                                    <td>
+                                        ${{ holding.market_value|floatformat:2 }}
+                                    </td>
+                                </tr>
+                            {% empty %}
+                                <tr>
+                                    <td colspan="4">
+                                        No confirmed holdings yet.
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <footer>
+        Experiment. Share Results. Enjoy the Process.
+    </footer>
+</body>
+</html>
