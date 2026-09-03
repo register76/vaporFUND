@@ -3,13 +3,13 @@ from django.core.management.base import BaseCommand, CommandError
 from portfolio.models import Contribution
 from portfolio.workflows import (
     WorkflowError,
-    generate_draft_recommendation,
+    generate_draft_recommendations,
 )
 
 
 class Command(BaseCommand):
     help = (
-        "Generate a target-allocation recommendation "
+        "Generate a target-allocation purchase plan "
         "for an unprocessed contribution"
     )
 
@@ -47,40 +47,41 @@ class Command(BaseCommand):
             )
 
         try:
-            recommendation, decision, created = (
-                generate_draft_recommendation(
+            recommendations, plan, created = (
+                generate_draft_recommendations(
                     contribution
                 )
             )
         except WorkflowError as error:
             raise CommandError(str(error)) from error
 
-        selected = decision.selected
+        initial_decision = plan.decisions[0]
         verb = "Created" if created else "Updated"
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"{verb} recommendation for contribution "
+                f"{verb} recommendation plan for "
+                f"contribution "
                 f"{contribution.sequence_number}"
             )
         )
         self.stdout.write("")
         self.stdout.write(
             f"Portfolio value: "
-            f"${decision.portfolio_value:.2f}"
+            f"${initial_decision.portfolio_value:.2f}"
         )
         self.stdout.write(
             f"Holding value: "
-            f"${decision.holding_value:.2f}"
+            f"${initial_decision.holding_value:.2f}"
         )
         self.stdout.write(
             f"Shared cash: "
-            f"${decision.available_cash:.2f}"
+            f"${initial_decision.available_cash:.2f}"
         )
         self.stdout.write("")
-        self.stdout.write("Current target allocation:")
+        self.stdout.write("Initial target allocation:")
 
-        for row in decision.rows:
+        for row in initial_decision.rows:
             self.stdout.write(
                 f"  {row.etf.ticker:<5} "
                 f"{row.actual_percent:>6.2f}% / "
@@ -89,35 +90,54 @@ class Command(BaseCommand):
             )
 
         self.stdout.write("")
-        self.stdout.write(
-            f"Selected ETF: {selected.etf.ticker}"
+        self.stdout.write("Purchase plan:")
+
+        total_estimated_cost = sum(
+            (
+                decision.estimated_cost
+                for decision in plan.decisions
+            ),
+            start=0,
         )
+
+        for recommendation, decision in zip(
+            recommendations,
+            plan.decisions,
+        ):
+            if decision.action == "BUY":
+                self.stdout.write(
+                    f"  Purchase "
+                    f"{recommendation.plan_order}: "
+                    f"BUY {decision.shares} "
+                    f"{decision.selected.etf.ticker} "
+                    f"at approximately "
+                    f"${decision.selected.reference_price:.2f} "
+                    f"${decision.estimated_cost:.2f}"
+                )
+            else:
+                self.stdout.write(
+                    f"  Purchase "
+                    f"{recommendation.plan_order}: "
+                    f"HOLD CASH"
+                )
+
+            self.stdout.write(
+                f"    {decision.reason}"
+            )
+
+        self.stdout.write("")
         self.stdout.write(
-            f"Reference price: "
-            f"${selected.reference_price:.2f} "
-            f"as of {selected.price_date}"
-        )
-        self.stdout.write(
-            f"Action: {decision.action}"
-        )
-        self.stdout.write(
-            f"Shares: {decision.shares}"
-        )
-        self.stdout.write(
-            f"Estimated cost: "
-            f"${decision.estimated_cost:.2f}"
+            f"Total estimated purchases: "
+            f"${total_estimated_cost:.2f}"
         )
         self.stdout.write(
             f"Estimated remaining cash: "
-            f"${decision.remaining_cash:.2f}"
-        )
-        self.stdout.write(
-            f"Reason: {decision.reason}"
+            f"${plan.remaining_cash:.2f}"
         )
         self.stdout.write(
             self.style.WARNING(
-                "Draft recommendation only. Compliance "
-                "approval and manual Merrill execution "
-                "are required."
+                "Draft purchase plan only. Execute purchases "
+                "manually at Merrill, then record each actual "
+                "execution in vaporFUND."
             )
         )

@@ -726,7 +726,7 @@ class RecommendationCommandTests(TestCase):
         cash_transaction.amount = Decimal("200.00")
         cash_transaction.save(update_fields=["amount"])
 
-        self.generate()
+        output = self.generate()
 
         recommendations = list(
             Recommendation.objects.filter(
@@ -760,6 +760,27 @@ class RecommendationCommandTests(TestCase):
         self.assertEqual(
             second.estimated_cost,
             Decimal("90.00"),
+        )
+
+        self.assertIn(
+            "Purchase 1: BUY 2 VTEB",
+            output,
+        )
+        self.assertIn(
+            "Purchase 2: BUY 3 SCHB",
+            output,
+        )
+        self.assertIn(
+            "Total estimated purchases: $190.00",
+            output,
+        )
+        self.assertIn(
+            "Estimated remaining cash: $10.00",
+            output,
+        )
+        self.assertNotIn(
+            "Compliance approval",
+            output,
         )
 
 
