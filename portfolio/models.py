@@ -155,10 +155,13 @@ class Recommendation(models.Model):
         EXECUTED = "EXECUTED", "Executed"
         CANCELLED = "CANCELLED", "Cancelled"
 
-    contribution = models.OneToOneField(
+    contribution = models.ForeignKey(
         Contribution,
         on_delete=models.PROTECT,
-        related_name="recommendation",
+        related_name="recommendations",
+    )
+    plan_order = models.PositiveSmallIntegerField(
+        default=1,
     )
     etf = models.ForeignKey(
         ETF,
@@ -213,7 +216,19 @@ class Recommendation(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["-contribution__date"]
+        ordering = [
+            "-contribution__date",
+            "plan_order",
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "contribution",
+                    "plan_order",
+                ],
+                name="unique_recommendation_plan_order",
+            ),
+        ]
 
     def __str__(self):
         return (
