@@ -24,6 +24,7 @@ from .models import (
 from .services import (
     AllocationError,
     calculate_allocation,
+    calculate_purchase_plan,
     choose_share_quantity,
 )
 
@@ -388,6 +389,46 @@ class AllocationServiceTests(TestCase):
         self.assertEqual(
             decision.remaining_cash,
             Decimal("70.00"),
+        )
+
+    def test_purchase_plan_recalculates_after_each_buy(self):
+        ETF.objects.update(target_percent=0)
+
+        schb = self.etfs["SCHB"]
+        schb.target_percent = 50
+        schb.save(update_fields=["target_percent"])
+
+        vteb = self.etfs["VTEB"]
+        vteb.target_percent = 50
+        vteb.save(update_fields=["target_percent"])
+
+        self.add_cash(amount="200.00")
+
+        plan = calculate_purchase_plan(
+            date(2026, 8, 31)
+        )
+
+        self.assertEqual(len(plan.decisions), 2)
+
+        first, second = plan.decisions
+
+        self.assertEqual(first.selected.etf, vteb)
+        self.assertEqual(first.shares, 2)
+        self.assertEqual(
+            first.estimated_cost,
+            Decimal("100.00"),
+        )
+
+        self.assertEqual(second.selected.etf, schb)
+        self.assertEqual(second.shares, 3)
+        self.assertEqual(
+            second.estimated_cost,
+            Decimal("90.00"),
+        )
+
+        self.assertEqual(
+            plan.remaining_cash,
+            Decimal("10.00"),
         )
 
     def test_unaffordable_selected_etf_holds_cash(self):
