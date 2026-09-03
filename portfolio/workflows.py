@@ -8,7 +8,10 @@ from .models import (
     Contribution,
     Recommendation,
 )
-from .services import AllocationError, calculate_allocation
+from .services import (
+    AllocationError,
+    calculate_purchase_plan,
+)
 
 
 MONEY = Decimal("0.01")
@@ -83,57 +86,90 @@ def create_contribution(
     return contribution
 
 
-def generate_draft_recommendation(contribution):
+@transaction.atomic
+def generate_draft_recommendations(contribution):
     if contribution.processed:
         raise WorkflowError(
             "This contribution has already been processed."
         )
 
-    existing = Recommendation.objects.filter(
-        contribution=contribution
-    ).first()
+    existing = list(
+        Recommendation.objects
+        .select_for_update()
+        .filter(contribution=contribution)
+        .order_by("plan_order")
+    )
 
-    if (
-        existing
-        and existing.status
+    if any(
+        recommendation.status
         != Recommendation.Status.DRAFT
+        for recommendation in existing
     ):
         raise WorkflowError(
-            "The existing recommendation is no longer a "
-            "draft and cannot be regenerated."
+            "An existing recommendation is no longer a "
+            "draft, so this purchase plan cannot be "
+            "regenerated."
         )
 
     try:
-        decision = calculate_allocation(
+        plan = calculate_purchase_plan(
             contribution.date
         )
     except AllocationError as error:
         raise WorkflowError(str(error)) from error
 
-    selected = decision.selected
+    recommendations = []
 
-    recommendation, created = (
-        Recommendation.objects.update_or_create(
-            contribution=contribution,
-            defaults={
-                "etf": selected.etf,
-                "action": decision.action,
-                "status": Recommendation.Status.DRAFT,
-                "available_cash": decision.available_cash,
-                "portfolio_value": decision.portfolio_value,
-                "current_value": selected.current_value,
-                "target_value": selected.target_value,
-                "target_shortfall": selected.shortfall,
-                "reference_price": selected.reference_price,
-                "price_date": selected.price_date,
-                "shares": decision.shares,
-                "estimated_cost": decision.estimated_cost,
-                "reason": decision.reason,
-            },
+    for plan_order, decision in enumerate(
+        plan.decisions,
+        start=1,
+    ):
+        selected = decision.selected
+
+        recommendation, _ = (
+            Recommendation.objects.update_or_create(
+                contribution=contribution,
+                plan_order=plan_order,
+                defaults={
+                    "etf": selected.etf,
+                    "action": decision.action,
+                    "status": Recommendation.Status.DRAFT,
+                    "available_cash": decision.available_cash,
+                    "portfolio_value": decision.portfolio_value,
+                    "current_value": selected.current_value,
+                    "target_value": selected.target_value,
+                    "target_shortfall": selected.shortfall,
+                    "reference_price": selected.reference_price,
+                    "price_date": selected.price_date,
+                    "shares": decision.shares,
+                    "estimated_cost": decision.estimated_cost,
+                    "reason": decision.reason,
+                },
+            )
         )
+
+        recommendations.append(recommendation)
+
+    Recommendation.objects.filter(
+        contribution=contribution,
+        plan_order__gt=len(recommendations),
+    ).delete()
+
+    created = not existing
+
+    return tuple(recommendations), plan, created
+
+
+def generate_draft_recommendation(contribution):
+    recommendations, plan, created = (
+        generate_draft_recommendations(contribution)
     )
 
-    return recommendation, decision, created
+    return (
+        recommendations[0],
+        plan.decisions[0],
+        created,
+    )
 
 
 @transaction.atomic

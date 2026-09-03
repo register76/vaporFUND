@@ -706,6 +706,63 @@ class RecommendationCommandTests(TestCase):
             output,
         )
 
+    def test_command_creates_ordered_purchase_plan(self):
+        ETF.objects.update(target_percent=0)
+
+        schb = self.etfs["SCHB"]
+        schb.target_percent = 50
+        schb.save(update_fields=["target_percent"])
+
+        vteb = self.etfs["VTEB"]
+        vteb.target_percent = 50
+        vteb.save(update_fields=["target_percent"])
+
+        self.contribution.amount = Decimal("200.00")
+        self.contribution.save(update_fields=["amount"])
+
+        cash_transaction = (
+            self.contribution.cash_transaction
+        )
+        cash_transaction.amount = Decimal("200.00")
+        cash_transaction.save(update_fields=["amount"])
+
+        self.generate()
+
+        recommendations = list(
+            Recommendation.objects.filter(
+                contribution=self.contribution
+            ).order_by("plan_order")
+        )
+
+        self.assertEqual(len(recommendations), 2)
+
+        first, second = recommendations
+
+        self.assertEqual(first.plan_order, 1)
+        self.assertEqual(first.etf, vteb)
+        self.assertEqual(first.shares, 2)
+        self.assertEqual(
+            first.available_cash,
+            Decimal("200.00"),
+        )
+        self.assertEqual(
+            first.estimated_cost,
+            Decimal("100.00"),
+        )
+
+        self.assertEqual(second.plan_order, 2)
+        self.assertEqual(second.etf, schb)
+        self.assertEqual(second.shares, 3)
+        self.assertEqual(
+            second.available_cash,
+            Decimal("100.00"),
+        )
+        self.assertEqual(
+            second.estimated_cost,
+            Decimal("90.00"),
+        )
+
+
     def test_regenerating_draft_is_idempotent(self):
         first_output = self.generate()
         first = Recommendation.objects.get()
