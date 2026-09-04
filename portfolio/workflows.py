@@ -182,6 +182,31 @@ def add_contribution_and_recommend(
         amount=amount,
     )
 
+    active_contribution = (
+        Contribution.objects
+        .select_for_update()
+        .filter(
+            processed=False,
+            recommendations__status__in=[
+                Recommendation.Status.DRAFT,
+                Recommendation.Status.COMPLIANCE_APPROVED,
+            ],
+        )
+        .exclude(pk=contribution.pk)
+        .distinct()
+        .order_by("sequence_number")
+        .first()
+    )
+
+    if active_contribution:
+        raise WorkflowError(
+            f"Contribution "
+            f"{active_contribution.sequence_number} "
+            f"still has an active purchase plan. "
+            f"Record or cancel it before adding "
+            f"another contribution."
+        )
+
     recommendation, decision, created = (
         generate_draft_recommendation(
             contribution
@@ -189,7 +214,6 @@ def add_contribution_and_recommend(
     )
 
     return contribution, recommendation, decision
-
 
 @transaction.atomic
 def approve_recommendation(

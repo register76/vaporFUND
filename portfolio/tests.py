@@ -1463,6 +1463,37 @@ class DashboardContributionTests(TestCase):
             1,
         )
 
+    def test_new_contribution_is_blocked_while_plan_pending(
+        self,
+    ):
+        self.post_contribution(
+            contribution_date="2026-09-01",
+        )
+
+        response = self.post_contribution(
+            contribution_date="2026-09-08",
+        )
+
+        self.assertContains(
+            response,
+            (
+                "Contribution 1 still has an active "
+                "purchase plan"
+            ),
+        )
+        self.assertEqual(
+            Contribution.objects.count(),
+            1,
+        )
+        self.assertEqual(
+            CashTransaction.objects.count(),
+            1,
+        )
+        self.assertEqual(
+            Recommendation.objects.count(),
+            1,
+        )
+
     def test_failure_to_generate_rolls_back_deposit(self):
         PriceHistory.objects.filter(
             etf=self.etfs["VTEB"]
