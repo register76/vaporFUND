@@ -65,19 +65,46 @@ def dashboard(request):
                     str(error),
                 )
             else:
-                if recommendation.action == "BUY":
-                    result = (
-                        f"Contribution "
-                        f"{contribution.sequence_number} added. "
-                        f"Draft recommendation: buy "
-                        f"{recommendation.shares} "
-                        f"{recommendation.etf.ticker}."
-                    )
-                else:
+                recommendations = list(
+                    contribution.recommendations
+                    .select_related("etf")
+                    .order_by("plan_order")
+                )
+
+                buy_recommendations = [
+                    item
+                    for item in recommendations
+                    if item.action
+                    == Recommendation.Action.BUY
+                ]
+
+                if not buy_recommendations:
                     result = (
                         f"Contribution "
                         f"{contribution.sequence_number} added. "
                         f"The recommendation is to hold cash."
+                    )
+                elif len(buy_recommendations) == 1:
+                    item = buy_recommendations[0]
+
+                    result = (
+                        f"Contribution "
+                        f"{contribution.sequence_number} added. "
+                        f"Draft recommendation: buy "
+                        f"{item.shares} {item.etf.ticker}."
+                    )
+                else:
+                    purchase_summary = ", then ".join(
+                        f"buy {item.shares} "
+                        f"{item.etf.ticker}"
+                        for item in buy_recommendations
+                    )
+
+                    result = (
+                        f"Contribution "
+                        f"{contribution.sequence_number} added. "
+                        f"Draft purchase plan: "
+                        f"{purchase_summary}."
                     )
 
                 messages.success(
@@ -86,6 +113,7 @@ def dashboard(request):
                 )
 
                 return redirect(request.path)
+
     else:
         contribution_form = ContributionForm()
 
@@ -230,14 +258,53 @@ def dashboard(request):
         bond_percent = Decimal("0.00")
         cash_percent = Decimal("0.00")
 
-    latest_recommendation = (
-        Recommendation.objects
-        .select_related(
-            "contribution",
-            "etf",
-        )
-        .order_by("-created_at")
+    latest_plan_contribution = (
+        Contribution.objects
+        .filter(recommendations__isnull=False)
+        .distinct()
+        .order_by("-sequence_number")
         .first()
+    )
+
+    latest_recommendations = []
+    latest_plan_total = Decimal("0.00")
+    latest_plan_remaining_cash = Decimal("0.00")
+
+    if latest_plan_contribution:
+        latest_recommendations = list(
+            Recommendation.objects
+            .filter(
+                contribution=latest_plan_contribution
+            )
+            .select_related(
+                "contribution",
+                "etf",
+            )
+            .order_by("plan_order")
+        )
+
+        latest_plan_total = sum(
+            (
+                recommendation.estimated_cost
+                for recommendation
+                in latest_recommendations
+            ),
+            Decimal("0.00"),
+        ).quantize(Decimal("0.01"))
+
+        final_recommendation = (
+            latest_recommendations[-1]
+        )
+
+        latest_plan_remaining_cash = (
+            final_recommendation.available_cash
+            - final_recommendation.estimated_cost
+        ).quantize(Decimal("0.01"))
+
+    latest_recommendation = (
+        latest_recommendations[0]
+        if latest_recommendations
+        else None
     )
 
     contributions = (
@@ -267,6 +334,12 @@ def dashboard(request):
         "allocation_error": allocation_error,
         "next_priority": next_priority,
         "latest_recommendation": latest_recommendation,
+        "latest_plan_contribution": latest_plan_contribution,
+        "latest_recommendations": latest_recommendations,
+        "latest_plan_total": latest_plan_total,
+        "latest_plan_remaining_cash": (
+            latest_plan_remaining_cash
+        ),
         "contributions": contributions,
         "holdings": holdings,
         "configured_targets": configured_targets,

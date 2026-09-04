@@ -1334,6 +1334,83 @@ class DashboardContributionTests(TestCase):
             "Draft recommendation: buy 1 SCHB",
         )
 
+    def test_dashboard_displays_complete_purchase_plan(self):
+        ETF.objects.update(target_percent=0)
+
+        schb = self.etfs["SCHB"]
+        schb.target_percent = 50
+        schb.save(update_fields=["target_percent"])
+
+        vteb = self.etfs["VTEB"]
+        vteb.target_percent = 50
+        vteb.save(update_fields=["target_percent"])
+
+        response = self.post_contribution(
+            amount="200.00",
+        )
+
+        recommendations = list(
+            response.context["latest_recommendations"]
+        )
+
+        self.assertEqual(len(recommendations), 2)
+        self.assertEqual(
+            [item.plan_order for item in recommendations],
+            [1, 2],
+        )
+
+        self.assertContains(
+            response,
+            "Latest purchase plan",
+        )
+        self.assertContains(
+            response,
+            "Contribution #1",
+        )
+        self.assertContains(
+            response,
+            "Purchase 1",
+        )
+        self.assertContains(
+            response,
+            "2 VTEB",
+        )
+        self.assertContains(
+            response,
+            "Purchase 2",
+        )
+        self.assertContains(
+            response,
+            "3 SCHB",
+        )
+        self.assertContains(
+            response,
+            "Total planned",
+        )
+        self.assertContains(
+            response,
+            "$190.00",
+        )
+        self.assertContains(
+            response,
+            "Cash carried forward",
+        )
+        self.assertContains(
+            response,
+            "$10.00",
+        )
+        self.assertNotContains(
+            response,
+            "Compliance approval",
+        )
+        self.assertContains(
+            response,
+            (
+                "Draft purchase plan: buy 2 VTEB, "
+                "then buy 3 SCHB"
+            ),
+        )
+
     def test_zero_amount_is_rejected_by_server(self):
         response = self.post_contribution(
             amount="0.00",

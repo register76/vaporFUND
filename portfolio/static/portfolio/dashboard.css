@@ -248,6 +248,51 @@ main {
     font-size: 0.82rem;
 }
 
+.purchase-plan-list {
+    display: grid;
+    gap: 16px;
+    margin-top: 20px;
+}
+
+.purchase-plan-item {
+    padding: 20px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: rgba(23, 35, 30, 0.55);
+}
+
+.purchase-plan-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.purchase-plan-number {
+    margin: 0 0 5px;
+    color: var(--muted);
+    font-size: 0.76rem;
+    font-weight: 750;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.purchase-plan-item .recommendation-action {
+    margin: 0 0 16px;
+    font-size: clamp(1.5rem, 4vw, 2.25rem);
+}
+
+.purchase-plan-item .recommendation-details {
+    margin-bottom: 14px;
+}
+
+.purchase-plan-note {
+    margin: 20px 0 0;
+    color: var(--yellow);
+    font-size: 0.82rem;
+}
+
 .allocation-summary {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
