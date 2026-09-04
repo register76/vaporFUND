@@ -90,7 +90,7 @@ def dashboard(request):
                     result = (
                         f"Contribution "
                         f"{contribution.sequence_number} added. "
-                        f"Draft recommendation: buy "
+                        f"Draft purchase plan: buy "
                         f"{item.shares} {item.etf.ticker}."
                     )
                 else:

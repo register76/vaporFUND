@@ -1261,7 +1261,7 @@ class DashboardContributionTests(TestCase):
         )
         self.assertContains(
             response,
-            "generate recommendation",
+            "generate purchase plan",
         )
 
     def test_post_creates_contribution_deposit_and_draft(self):
@@ -1331,7 +1331,7 @@ class DashboardContributionTests(TestCase):
 
         self.assertContains(
             response,
-            "Draft recommendation: buy 1 SCHB",
+            "Draft purchase plan: buy 1 SCHB",
         )
 
     def test_dashboard_displays_complete_purchase_plan(self):
