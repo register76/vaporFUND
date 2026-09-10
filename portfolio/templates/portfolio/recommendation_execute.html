@@ -1,0 +1,212 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+    <title>
+        Record purchase {{ recommendation.plan_order }}
+        · vaporFUND
+    </title>
+    <link
+        rel="stylesheet"
+        href="{% static 'portfolio/dashboard.css' %}"
+    >
+</head>
+<body>
+    <header class="site-header">
+        <div>
+            <p class="eyebrow">VaporWare Labs</p>
+            <h1 class="site-title">
+                vapor<span>FUND</span>
+            </h1>
+            <p class="tagline">
+                Record a completed Merrill purchase
+            </p>
+        </div>
+
+        <a
+            class="admin-link"
+            href="{% url 'portfolio:recommendation_review' contribution.sequence_number %}"
+        >
+            Back to purchase plan
+        </a>
+    </header>
+
+    <main>
+        <section class="panel review-hero">
+            <div class="panel-header">
+                <div>
+                    <p class="section-label">
+                        Contribution
+                        #{{ contribution.sequence_number }}
+                        · Purchase
+                        {{ recommendation.plan_order }}
+                    </p>
+                    <h2>Record completed purchase</h2>
+                    <p class="panel-note">
+                        Enter the actual details from the
+                        completed Merrill transaction.
+                    </p>
+                </div>
+
+                <span class="status {{ recommendation.status|lower }}">
+                    {{ recommendation.get_status_display }}
+                </span>
+            </div>
+
+            <p class="recommendation-action">
+                <span class="verb">Buy</span>
+                {{ recommendation.shares }}
+                {{ recommendation.etf.ticker }}
+            </p>
+
+            <div class="recommendation-details">
+                <div class="detail-box">
+                    <span>Reference price</span>
+                    <strong>
+                        ${{ recommendation.reference_price|floatformat:2 }}
+                    </strong>
+                </div>
+
+                <div class="detail-box">
+                    <span>Recommended shares</span>
+                    <strong>{{ recommendation.shares }}</strong>
+                </div>
+
+                <div class="detail-box">
+                    <span>Estimated cost</span>
+                    <strong>
+                        ${{ recommendation.estimated_cost|floatformat:2 }}
+                    </strong>
+                </div>
+
+                <div class="detail-box">
+                    <span>Available cash</span>
+                    <strong>
+                        ${{ recommendation.available_cash|floatformat:2 }}
+                    </strong>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            {% if execution_form.non_field_errors %}
+                <div class="message-list">
+                    {% for error in execution_form.non_field_errors %}
+                        <div class="message-banner error">
+                            {{ error }}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            <form method="post" class="contribution-form">
+                {% csrf_token %}
+
+                <div class="form-field">
+                    {{ execution_form.trade_date.label_tag }}
+                    {{ execution_form.trade_date }}
+
+                    {% for error in execution_form.trade_date.errors %}
+                        <p class="error">{{ error }}</p>
+                    {% endfor %}
+                </div>
+
+                <div class="form-field">
+                    {{ execution_form.price_per_share.label_tag }}
+
+                    <div class="money-input">
+                        <span>$</span>
+                        {{ execution_form.price_per_share }}
+                    </div>
+
+                    {% for error in execution_form.price_per_share.errors %}
+                        <p class="error">{{ error }}</p>
+                    {% endfor %}
+                </div>
+
+                <div class="form-field">
+                    {{ execution_form.shares.label_tag }}
+                    {{ execution_form.shares }}
+
+                    {% for error in execution_form.shares.errors %}
+                        <p class="error">{{ error }}</p>
+                    {% endfor %}
+                </div>
+
+                <div class="form-field">
+                    {{ execution_form.fees.label_tag }}
+
+                    <div class="money-input">
+                        <span>$</span>
+                        {{ execution_form.fees }}
+                    </div>
+
+                    {% for error in execution_form.fees.errors %}
+                        <p class="error">{{ error }}</p>
+                    {% endfor %}
+                </div>
+
+                <div class="form-field">
+                    {{ execution_form.broker_reference.label_tag }}
+                    {{ execution_form.broker_reference }}
+
+                    {% for error in execution_form.broker_reference.errors %}
+                        <p class="error">{{ error }}</p>
+                    {% endfor %}
+                </div>
+
+                <div class="form-field">
+                    <label>
+                        {{ execution_form.confirm_execution }}
+                        {{ execution_form.confirm_execution.label }}
+                    </label>
+
+                    {% for error in execution_form.confirm_execution.errors %}
+                        <p class="error">{{ error }}</p>
+                    {% endfor %}
+                </div>
+
+                <button type="submit" class="primary-button">
+                    Record completed purchase
+                </button>
+            </form>
+
+            <p class="form-safety-note">
+                This records a purchase that already occurred.
+                vaporFUND does not submit an order to Merrill.
+            </p>
+
+            <a
+                class="review-link"
+                href="{% url 'portfolio:recommendation_review' contribution.sequence_number %}"
+            >
+                Cancel and return to purchase plan
+            </a>
+        </section>
+
+        <section class="panel safety-panel">
+            <p class="section-label">Before recording</p>
+            <h2>Verify the completed trade</h2>
+
+            <ul>
+                <li>Confirm the ticker and number of shares.</li>
+                <li>Use the actual fill price from Merrill.</li>
+                <li>Include any transaction fees.</li>
+                <li>
+                    Recording creates a cash transaction,
+                    execution record, and holding lot.
+                </li>
+            </ul>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        vaporFUND · Experiment. Share Results. Enjoy the Process.
+    </footer>
+</body>
+</html>

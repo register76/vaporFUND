@@ -30,6 +30,7 @@ ALLOWED_HOSTS = [
     "192.168.1.20",
     "127.0.0.1",
     "localhost",
+    "fund.vaporwarelabs.org",
 ]
 
 
@@ -74,6 +75,14 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
+CSRF_TRUSTED_ORIGINS = [
+    "https://fund.vaporwarelabs.org",
+]
+
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases

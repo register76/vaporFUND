@@ -265,15 +265,13 @@
                     manually at Merrill, then record each actual
                     execution in vaporFUND.
                 </p>
+                <a
+                    class="review-link"
+                    href="{% url 'portfolio:recommendation_review' latest_plan_contribution.sequence_number %}"
+                >
+                    Review purchase plan
+                </a>
 
-                {% if latest_recommendations|length == 1 %}
-                    <a
-                        class="review-link"
-                        href="{% url 'portfolio:recommendation_review' latest_plan_contribution.sequence_number %}"
-                    >
-                        Review recommendation
-                    </a>
-                {% endif %}
             {% else %}
                 <div class="empty-state">
                     <strong>No purchase plan yet</strong>

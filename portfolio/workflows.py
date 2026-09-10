@@ -1,13 +1,17 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
+from django.db.models import Sum
 
 from .models import (
     CashTransaction,
     Contribution,
+    HoldingLot,
     Recommendation,
+    TradeExecution,
 )
+
 from .services import (
     AllocationError,
     calculate_purchase_plan,
@@ -216,6 +220,194 @@ def add_contribution_and_recommend(
     return contribution, recommendation, decision
 
 @transaction.atomic
+def update_contribution_processed(contribution):
+    has_pending_purchases = (
+        contribution.recommendations
+        .filter(
+            action=Recommendation.Action.BUY
+        )
+        .exclude(
+            status__in=[
+                Recommendation.Status.EXECUTED,
+                Recommendation.Status.CANCELLED,
+            ]
+        )
+        .exists()
+    )
+
+    contribution.processed = (
+        not has_pending_purchases
+    )
+    contribution.save(
+        update_fields=["processed"]
+    )
+
+    return contribution.processed
+
+
+@transaction.atomic
+def execute_recommendation(
+    recommendation,
+    trade_date,
+    price_per_share,
+    shares=None,
+    fees=Decimal("0.00"),
+    broker_reference="",
+):
+    recommendation = (
+        Recommendation.objects
+        .select_for_update()
+        .select_related(
+            "contribution",
+            "etf",
+        )
+        .get(pk=recommendation.pk)
+    )
+
+    if TradeExecution.objects.filter(
+        recommendation=recommendation
+    ).exists():
+        raise WorkflowError(
+            "This recommendation already has an execution."
+        )
+
+    if recommendation.status not in [
+        Recommendation.Status.DRAFT,
+        Recommendation.Status.COMPLIANCE_APPROVED,
+    ]:
+        raise WorkflowError(
+            "Only draft or compliance-approved "
+            "recommendations can be executed."
+        )
+
+    if recommendation.action != Recommendation.Action.BUY:
+        raise WorkflowError(
+            "The recommendation does not authorize "
+            "a purchase."
+        )
+
+    if not isinstance(trade_date, date):
+        raise WorkflowError(
+            "A valid trade date is required."
+        )
+
+    try:
+        price_per_share = Decimal(price_per_share)
+        fees = Decimal(fees).quantize(MONEY)
+    except (InvalidOperation, TypeError, ValueError) as error:
+        raise WorkflowError(
+            "Enter valid price and fee amounts."
+        ) from error
+
+    if shares is None:
+        shares = recommendation.shares
+
+    if trade_date < recommendation.contribution.date:
+        raise WorkflowError(
+            "Trade date cannot precede the "
+            "contribution date."
+        )
+
+    if shares <= 0:
+        raise WorkflowError(
+            "Shares must be greater than zero."
+        )
+
+    if shares > recommendation.shares:
+        raise WorkflowError(
+            f"Actual shares cannot exceed the recommended "
+            f"{recommendation.shares} shares."
+        )
+
+    if price_per_share <= 0:
+        raise WorkflowError(
+            "Price must be greater than zero."
+        )
+
+    if fees < 0:
+        raise WorkflowError(
+            "Fees cannot be negative."
+        )
+
+    total_cost = (
+        (price_per_share * shares) + fees
+    ).quantize(MONEY)
+
+    available_cash = (
+        CashTransaction.objects.filter(
+            date__lte=trade_date
+        ).aggregate(
+            total=Sum("amount")
+        )["total"]
+        or Decimal("0.00")
+    )
+
+    if total_cost > available_cash:
+        raise WorkflowError(
+            f"Insufficient cash. Cost is "
+            f"${total_cost:.2f}; available cash is "
+            f"${available_cash:.2f}."
+        )
+
+    cash_transaction = CashTransaction.objects.create(
+        date=trade_date,
+        transaction_type=(
+            CashTransaction.TransactionType.PURCHASE
+        ),
+        amount=-total_cost,
+        description=(
+            f"Purchased {shares} "
+            f"{recommendation.etf.ticker} "
+            f"at ${price_per_share}"
+        ),
+    )
+
+    execution = TradeExecution.objects.create(
+        recommendation=recommendation,
+        trade_date=trade_date,
+        etf=recommendation.etf,
+        shares=shares,
+        price_per_share=price_per_share,
+        fees=fees,
+        total_cost=total_cost,
+        cash_transaction=cash_transaction,
+        broker_reference=broker_reference,
+    )
+
+    eligible_date = trade_date + timedelta(days=30)
+
+    holding_lot = HoldingLot.objects.create(
+        execution=execution,
+        etf=recommendation.etf,
+        purchase_date=trade_date,
+        shares_acquired=shares,
+        shares_remaining=shares,
+        price_per_share=price_per_share,
+        total_cost=total_cost,
+        compliance_eligible_date=eligible_date,
+    )
+
+    recommendation.status = (
+        Recommendation.Status.EXECUTED
+    )
+    recommendation.save(
+        update_fields=[
+            "status",
+            "updated_at",
+        ]
+    )
+
+    update_contribution_processed(
+        recommendation.contribution
+    )
+
+    remaining_cash = (
+        available_cash - total_cost
+    ).quantize(MONEY)
+
+    return execution, holding_lot, remaining_cash
+
+
 def approve_recommendation(
     sequence_number,
 ):
