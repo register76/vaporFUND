@@ -5,3 +5,4 @@ staticfiles/
 __pycache__/
 *.py[cod]
 .DS_Store
+import_prices.log
