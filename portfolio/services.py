@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal, ROUND_FLOOR
 
@@ -47,6 +47,12 @@ class AllocationDecision:
     remaining_cash: Decimal
     reason: str
 
+
+@dataclass(frozen=True)
+class AllocationPlan:
+    as_of_date: date
+    decisions: tuple
+    remaining_cash: Decimal
 
 def latest_price(etf, as_of_date):
     price = (
@@ -334,3 +340,125 @@ def choose_share_quantity(
         return 0
 
     return best_shares
+
+def calculate_purchase_plan(as_of_date):
+    decision = calculate_allocation(as_of_date)
+    decisions = []
+
+    while decision.action == "BUY":
+        decisions.append(decision)
+
+        if decision.remaining_cash <= 0:
+            break
+
+        decision = simulate_completed_purchase(decision)
+
+    if not decisions:
+        decisions.append(decision)
+
+    return AllocationPlan(
+        as_of_date=as_of_date,
+        decisions=tuple(decisions),
+        remaining_cash=decision.remaining_cash,
+    )
+
+
+def simulate_completed_purchase(decision):
+    rows = []
+
+    for row in decision.rows:
+        if row.etf.pk == decision.selected.etf.pk:
+            current_shares = (
+                row.current_shares + decision.shares
+            )
+            current_value = (
+                row.current_value
+                + decision.estimated_cost
+            ).quantize(MONEY)
+        else:
+            current_shares = row.current_shares
+            current_value = row.current_value
+
+        actual_percent = (
+            current_value
+            / decision.portfolio_value
+            * Decimal("100")
+        ).quantize(PERCENT)
+
+        shortfall = (
+            row.target_value - current_value
+        ).quantize(MONEY)
+
+        rows.append(
+            replace(
+                row,
+                current_shares=current_shares,
+                current_value=current_value,
+                actual_percent=actual_percent,
+                shortfall=shortfall,
+            )
+        )
+
+    selected = max(
+        rows,
+        key=lambda row: (
+            row.shortfall,
+            row.etf.ticker,
+        ),
+    )
+
+    available_cash = decision.remaining_cash
+
+    shares = choose_share_quantity(
+        shortfall=selected.shortfall,
+        share_price=selected.reference_price,
+        available_cash=available_cash,
+    )
+
+    estimated_cost = (
+        selected.reference_price * shares
+    ).quantize(MONEY)
+
+    remaining_cash = (
+        available_cash - estimated_cost
+    ).quantize(MONEY)
+
+    if shares > 0:
+        action = "BUY"
+        reason = (
+            f"After the preceding planned purchase, "
+            f"{selected.etf.ticker} has the largest "
+            f"target-dollar shortfall at "
+            f"${selected.shortfall:.2f}. Buying {shares} "
+            f"whole share{'s' if shares != 1 else ''} "
+            f"most reduces the allocation deviation."
+        )
+    else:
+        action = "HOLD_CASH"
+        reason = (
+            f"After the planned purchases, "
+            f"{selected.etf.ticker} has the largest "
+            f"target-dollar shortfall at "
+            f"${selected.shortfall:.2f}, but another "
+            f"whole-share purchase would not reduce the "
+            f"allocation deviation or cannot be afforded. "
+            f"Cash will carry forward; no substitute ETF "
+            f"will be purchased."
+        )
+
+    return AllocationDecision(
+        as_of_date=decision.as_of_date,
+        available_cash=available_cash,
+        holding_value=(
+            decision.holding_value
+            + decision.estimated_cost
+        ).quantize(MONEY),
+        portfolio_value=decision.portfolio_value,
+        rows=tuple(rows),
+        selected=selected,
+        action=action,
+        shares=shares,
+        estimated_cost=estimated_cost,
+        remaining_cash=remaining_cash,
+        reason=reason,
+    )

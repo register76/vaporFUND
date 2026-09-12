@@ -8,7 +8,7 @@
         content="width=device-width, initial-scale=1"
     >
     <title>
-        Recommendation #{{ contribution.sequence_number }}
+        Purchase plan #{{ contribution.sequence_number }}
         · vaporFUND
     </title>
     <link
@@ -24,7 +24,7 @@
                 vapor<span>FUND</span>
             </h1>
             <p class="tagline">
-                Read-only recommendation review
+                Read-only purchase plan review
             </p>
         </div>
 
@@ -54,7 +54,7 @@
                         Contribution
                         #{{ contribution.sequence_number }}
                     </p>
-                    <h2>Recommendation review</h2>
+                    <h2>Purchase plan review</h2>
                     <p class="panel-note">
                         Contribution date:
                         {{ contribution.date|date:"M. j, Y" }}
@@ -62,20 +62,10 @@
                 </div>
 
                 <span class="status">
-                    {{ recommendation.get_status_display }}
+                    {{ recommendations|length }}
+                    purchase{{ recommendations|length|pluralize }}
                 </span>
             </div>
-
-            <p class="recommendation-action">
-                {% if recommendation.action == "BUY" %}
-                    <span class="verb">Buy</span>
-                    {{ recommendation.shares }}
-                    {{ recommendation.etf.ticker }}
-                {% else %}
-                    <span class="verb">Hold</span>
-                    cash
-                {% endif %}
-            </p>
 
             <div class="recommendation-details">
                 <div class="detail-box">
@@ -86,37 +76,16 @@
                 </div>
 
                 <div class="detail-box">
-                    <span>Available cash</span>
+                    <span>Planned purchases</span>
                     <strong>
-                        ${{ recommendation.available_cash|floatformat:2 }}
+                        {{ recommendations|length }}
                     </strong>
                 </div>
 
                 <div class="detail-box">
-                    <span>Portfolio value</span>
+                    <span>Total planned</span>
                     <strong>
-                        ${{ recommendation.portfolio_value|floatformat:2 }}
-                    </strong>
-                </div>
-
-                <div class="detail-box">
-                    <span>Reference price</span>
-                    <strong>
-                        ${{ recommendation.reference_price|floatformat:2 }}
-                    </strong>
-                </div>
-
-                <div class="detail-box">
-                    <span>Price date</span>
-                    <strong>
-                        {{ recommendation.price_date|date:"M. j, Y" }}
-                    </strong>
-                </div>
-
-                <div class="detail-box">
-                    <span>Estimated cost</span>
-                    <strong>
-                        ${{ recommendation.estimated_cost|floatformat:2 }}
+                        ${{ estimated_plan_total|floatformat:2 }}
                     </strong>
                 </div>
 
@@ -126,61 +95,121 @@
                         ${{ estimated_remaining_cash|floatformat:2 }}
                     </strong>
                 </div>
-
-                <div class="detail-box">
-                    <span>Target shortfall</span>
-                    <strong>
-                        ${{ recommendation.target_shortfall|floatformat:2 }}
-                    </strong>
-                </div>
             </div>
-            {% if recommendation.status == "DRAFT" and recommendation.action == "BUY" %}
-                <a
-                    class="approval-link"
-                    href="{% url 'portfolio:recommendation_approve' contribution.sequence_number %}"
-                >
-                    Continue to approval
-                </a>
-            {% endif %}
         </section>
 
         <section class="panel">
             <div class="panel-header">
                 <div>
-                    <p class="section-label">Decision audit</p>
-                    <h2>
-                        Why {{ recommendation.etf.ticker }}?
-                    </h2>
+                    <p class="section-label">Purchase sequence</p>
+                    <h2>Planned purchases</h2>
                 </div>
             </div>
 
-            <div class="audit-grid">
-                <div class="detail-box">
-                    <span>ETF</span>
-                    <strong>
-                        {{ recommendation.etf.ticker }}
-                    </strong>
-                    <p>{{ recommendation.etf.name }}</p>
-                </div>
+            <div class="purchase-plan-list">
+                {% for row in recommendation_rows %}
+                    {% with recommendation=row.recommendation %}
+                        <article class="purchase-plan-item">
+                            <div class="purchase-plan-heading">
+                                <div>
+                                    <p class="purchase-plan-number">Purchase {{ recommendation.plan_order }}</p>
 
-                <div class="detail-box">
-                    <span>Current value</span>
-                    <strong>
-                        ${{ recommendation.current_value|floatformat:2 }}
-                    </strong>
-                </div>
+                                    <div class="recommendation-action">
+                                        {% if recommendation.action == "BUY" %}
+                                            <span class="verb">Buy</span>
+                                            <strong>
+                                                {{ recommendation.shares }}
+                                                {{ recommendation.etf.ticker }}
+                                            </strong>
+                                        {% else %}
+                                            <span class="verb">Hold</span>
+                                            <strong>cash</strong>
+                                        {% endif %}
+                                    </div>
+                                </div>
 
-                <div class="detail-box">
-                    <span>Target value</span>
-                    <strong>
-                        ${{ recommendation.target_value|floatformat:2 }}
-                    </strong>
-                </div>
+                                <span class="status {{ recommendation.status|lower }}">
+                                    {{ recommendation.get_status_display }}
+                                </span>
+                            </div>
+
+                            <div class="recommendation-details">
+                                <div class="detail-box">
+                                    <span>Available cash</span>
+                                    <strong>
+                                        ${{ recommendation.available_cash|floatformat:2 }}
+                                    </strong>
+                                </div>
+
+                                <div class="detail-box">
+                                    <span>Reference price</span>
+                                    <strong>
+                                        ${{ recommendation.reference_price|floatformat:2 }}
+                                    </strong>
+                                </div>
+
+                                <div class="detail-box">
+                                    <span>Estimated cost</span>
+                                    <strong>
+                                        ${{ recommendation.estimated_cost|floatformat:2 }}
+                                    </strong>
+                                </div>
+
+                                <div class="detail-box">
+                                    <span>Remaining after purchase</span>
+                                    <strong>
+                                        ${{ row.estimated_remaining_cash|floatformat:2 }}
+                                    </strong>
+                                </div>
+
+                                <div class="detail-box">
+                                    <span>Price date</span>
+                                    <strong>
+                                        {{ recommendation.price_date|date:"M. j, Y" }}
+                                    </strong>
+                                </div>
+
+                                <div class="detail-box">
+                                    <span>Target shortfall</span>
+                                    <strong>
+                                        ${{ recommendation.target_shortfall|floatformat:2 }}
+                                    </strong>
+                                </div>
+
+                                <div class="detail-box">
+                                    <span>Current value</span>
+                                    <strong>
+                                        ${{ recommendation.current_value|floatformat:2 }}
+                                    </strong>
+                                </div>
+
+                                <div class="detail-box">
+                                    <span>Target value</span>
+                                    <strong>
+                                        ${{ recommendation.target_value|floatformat:2 }}
+                                    </strong>
+                                </div>
+                            </div>
+
+                            <p class="reason review-reason">
+                                {{ recommendation.reason }}
+                            </p>
+
+                            {% if recommendation.action == "BUY" %}
+                                {% if recommendation.status == "DRAFT" or recommendation.status == "COMPLIANCE_APPROVED" %}
+                                    <a
+                                        class="review-link"
+                                        href="{% url 'portfolio:recommendation_execute' contribution.sequence_number recommendation.plan_order %}"
+                                    >
+                                        Record purchase
+                                    </a>
+                                {% endif %}
+                            {% endif %}
+
+                        </article>
+                    {% endwith %}
+                {% endfor %}
             </div>
-
-            <p class="reason review-reason">
-                {{ recommendation.reason }}
-            </p>
         </section>
 
         <section class="panel safety-panel">
@@ -189,7 +218,7 @@
 
             <ul>
                 <li>This page is read-only.</li>
-                <li>No approval was performed by viewing this page.</li>
+                <li>Reviewing this page does not authorize a trade.</li>
                 <li>No Merrill order was submitted.</li>
                 <li>No purchase was recorded.</li>
                 <li>No holding lot was created.</li>

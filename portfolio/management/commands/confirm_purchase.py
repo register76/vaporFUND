@@ -1,17 +1,13 @@
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
-from django.db.models import Sum
 
-from portfolio.models import (
-    CashTransaction,
-    HoldingLot,
-    Recommendation,
-    TradeExecution,
+from portfolio.models import Recommendation
+from portfolio.workflows import (
+    WorkflowError,
+    execute_recommendation,
 )
-
 
 class Command(BaseCommand):
     help = "Record an actual manually executed Merrill purchase"
@@ -22,6 +18,12 @@ class Command(BaseCommand):
             type=int,
             required=True,
             help="Contribution sequence number",
+        )
+        parser.add_argument(
+            "--plan-order",
+            type=int,
+            default=1,
+            help="Purchase-plan order number; defaults to 1",
         )
         parser.add_argument(
             "--price",
@@ -53,19 +55,19 @@ class Command(BaseCommand):
             help="Optional Merrill order or confirmation reference",
         )
 
-    @transaction.atomic
     def handle(self, *args, **options):
         sequence_number = options["contribution"]
+        plan_order = options["plan_order"]
 
         recommendation = (
             Recommendation.objects
-            .select_for_update()
             .select_related(
                 "contribution",
                 "etf",
             )
             .filter(
-                contribution__sequence_number=sequence_number
+                contribution__sequence_number=sequence_number,
+                plan_order=plan_order,
             )
             .first()
         )
@@ -73,180 +75,52 @@ class Command(BaseCommand):
         if not recommendation:
             raise CommandError(
                 f"No recommendation exists for contribution "
-                f"{sequence_number}."
-            )
-
-        if TradeExecution.objects.filter(
-            recommendation=recommendation
-        ).exists():
-            raise CommandError(
-                "This recommendation already has an execution."
-            )
-
-        if recommendation.status != (
-            Recommendation.Status.COMPLIANCE_APPROVED
-        ):
-            raise CommandError(
-                "The recommendation has not been "
-                "compliance-approved."
-            )
-
-        if recommendation.action != (
-            Recommendation.Action.BUY
-        ):
-            raise CommandError(
-                "The recommendation does not authorize "
-                "a purchase."
+                f"{sequence_number}, plan order {plan_order}."
             )
 
         try:
             trade_date = date.fromisoformat(
                 options["trade_date"]
             )
-            price = Decimal(
-                options["price"]
-            )
-            fees = Decimal(
-                options["fees"]
-            ).quantize(
+            price = Decimal(options["price"])
+            fees = Decimal(options["fees"]).quantize(
                 Decimal("0.01")
             )
-        except (ValueError, InvalidOperation) as error:
+        except (
+            ValueError,
+            InvalidOperation,
+            TypeError,
+        ) as error:
             raise CommandError(str(error)) from error
 
-        shares = (
-            options["shares"]
-            if options["shares"] is not None
-            else recommendation.shares
-        )
-
-        if trade_date < recommendation.contribution.date:
-            raise CommandError(
-                "Trade date cannot precede the "
-                "contribution date."
+        try:
+            execution, holding_lot, remaining_cash = (
+                execute_recommendation(
+                    recommendation=recommendation,
+                    trade_date=trade_date,
+                    price_per_share=price,
+                    shares=options["shares"],
+                    fees=fees,
+                    broker_reference=options[
+                        "broker_reference"
+                    ],
+                )
             )
-
-        if shares <= 0:
-            raise CommandError(
-                "Shares must be greater than zero."
-            )
-
-        if shares > recommendation.shares:
-            raise CommandError(
-                f"Actual shares cannot exceed the recommended "
-                f"{recommendation.shares} shares."
-            )
-
-        if price <= 0:
-            raise CommandError(
-                "Price must be greater than zero."
-            )
-
-        if fees < 0:
-            raise CommandError(
-                "Fees cannot be negative."
-            )
-
-        total_cost = (
-            (price * shares) + fees
-        ).quantize(
-            Decimal("0.01")
-        )
-
-        available_cash = (
-            CashTransaction.objects.filter(
-                date__lte=trade_date
-            ).aggregate(
-                total=Sum("amount")
-            )["total"]
-            or Decimal("0.00")
-        )
-
-        if total_cost > available_cash:
-            raise CommandError(
-                f"Insufficient cash. Cost is "
-                f"${total_cost:.2f}; available cash is "
-                f"${available_cash:.2f}."
-            )
-
-        cash_transaction = (
-            CashTransaction.objects.create(
-                date=trade_date,
-                transaction_type=(
-                    CashTransaction
-                    .TransactionType
-                    .PURCHASE
-                ),
-                amount=-total_cost,
-                description=(
-                    f"Purchased {shares} "
-                    f"{recommendation.etf.ticker} "
-                    f"at ${price}"
-                ),
-            )
-        )
-
-        execution = TradeExecution.objects.create(
-            recommendation=recommendation,
-            trade_date=trade_date,
-            etf=recommendation.etf,
-            shares=shares,
-            price_per_share=price,
-            fees=fees,
-            total_cost=total_cost,
-            cash_transaction=cash_transaction,
-            broker_reference=options[
-                "broker_reference"
-            ],
-        )
-
-        eligible_date = trade_date + timedelta(days=30)
-
-        HoldingLot.objects.create(
-            execution=execution,
-            etf=recommendation.etf,
-            purchase_date=trade_date,
-            shares_acquired=shares,
-            shares_remaining=shares,
-            price_per_share=price,
-            total_cost=total_cost,
-            compliance_eligible_date=eligible_date,
-        )
-
-        recommendation.status = (
-            Recommendation.Status.EXECUTED
-        )
-        recommendation.save(
-            update_fields=[
-                "status",
-                "updated_at",
-            ]
-        )
-
-        contribution = recommendation.contribution
-        contribution.processed = True
-        contribution.save(
-            update_fields=["processed"]
-        )
-
-        remaining_cash = (
-            available_cash - total_cost
-        ).quantize(
-            Decimal("0.01")
-        )
+        except WorkflowError as error:
+            raise CommandError(str(error)) from error
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Confirmed purchase: {shares} "
-                f"{recommendation.etf.ticker} "
-                f"at ${price:.2f}"
+                f"Confirmed purchase: {execution.shares} "
+                f"{execution.etf.ticker} "
+                f"at ${execution.price_per_share:.2f}"
             )
         )
         self.stdout.write(
-            f"Trade date: {trade_date}"
+            f"Trade date: {execution.trade_date}"
         )
         self.stdout.write(
-            f"Total cost: ${total_cost:.2f}"
+            f"Total cost: ${execution.total_cost:.2f}"
         )
         self.stdout.write(
             f"Remaining shared cash: "
@@ -254,7 +128,7 @@ class Command(BaseCommand):
         )
         self.stdout.write(
             f"30-day system eligibility date: "
-            f"{eligible_date}"
+            f"{holding_lot.compliance_eligible_date}"
         )
         self.stdout.write(
             self.style.WARNING(

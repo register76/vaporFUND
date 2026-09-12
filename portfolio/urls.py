@@ -17,6 +17,15 @@ urlpatterns = [
         name="recommendation_review",
     ),
     path(
+        (
+            "recommendations/"
+            "<int:sequence_number>/"
+            "<int:plan_order>/execute/"
+        ),
+        views.recommendation_execute,
+        name="recommendation_execute",
+    ),
+    path(
         "recommendations/<int:sequence_number>/approve/",
         views.recommendation_approve,
         name="recommendation_approve",

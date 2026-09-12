@@ -1,22 +1,26 @@
 from datetime import date
+
 from decimal import Decimal
 
 from django.contrib import messages
+
 from django.views.decorators.http import (
     require_GET,
     require_http_methods,
 )
 
-from django.db.models import Sum
 from django.shortcuts import (
+    get_list_or_404,
     get_object_or_404,
-    redirect, 
+    redirect,
     render,
 )
 
+from django.db.models import Sum
+
 from .forms import (
-    ApprovalConfirmationForm,
     ContributionForm,
+    PurchaseExecutionForm,
 )
 
 from .models import (
@@ -26,15 +30,17 @@ from .models import (
     HoldingLot,
     Recommendation,
 )
+
 from .services import (
     AllocationError,
     calculate_allocation,
     latest_price,
 )
+
 from .workflows import (
     WorkflowError,
     add_contribution_and_recommend,
-    approve_recommendation as approve_recommendation_workflow,
+    execute_recommendation,
 )
 
 def dashboard(request):
@@ -65,19 +71,46 @@ def dashboard(request):
                     str(error),
                 )
             else:
-                if recommendation.action == "BUY":
-                    result = (
-                        f"Contribution "
-                        f"{contribution.sequence_number} added. "
-                        f"Draft recommendation: buy "
-                        f"{recommendation.shares} "
-                        f"{recommendation.etf.ticker}."
-                    )
-                else:
+                recommendations = list(
+                    contribution.recommendations
+                    .select_related("etf")
+                    .order_by("plan_order")
+                )
+
+                buy_recommendations = [
+                    item
+                    for item in recommendations
+                    if item.action
+                    == Recommendation.Action.BUY
+                ]
+
+                if not buy_recommendations:
                     result = (
                         f"Contribution "
                         f"{contribution.sequence_number} added. "
                         f"The recommendation is to hold cash."
+                    )
+                elif len(buy_recommendations) == 1:
+                    item = buy_recommendations[0]
+
+                    result = (
+                        f"Contribution "
+                        f"{contribution.sequence_number} added. "
+                        f"Draft purchase plan: buy "
+                        f"{item.shares} {item.etf.ticker}."
+                    )
+                else:
+                    purchase_summary = ", then ".join(
+                        f"buy {item.shares} "
+                        f"{item.etf.ticker}"
+                        for item in buy_recommendations
+                    )
+
+                    result = (
+                        f"Contribution "
+                        f"{contribution.sequence_number} added. "
+                        f"Draft purchase plan: "
+                        f"{purchase_summary}."
                     )
 
                 messages.success(
@@ -86,6 +119,7 @@ def dashboard(request):
                 )
 
                 return redirect(request.path)
+
     else:
         contribution_form = ContributionForm()
 
@@ -230,14 +264,53 @@ def dashboard(request):
         bond_percent = Decimal("0.00")
         cash_percent = Decimal("0.00")
 
-    latest_recommendation = (
-        Recommendation.objects
-        .select_related(
-            "contribution",
-            "etf",
-        )
-        .order_by("-created_at")
+    latest_plan_contribution = (
+        Contribution.objects
+        .filter(recommendations__isnull=False)
+        .distinct()
+        .order_by("-sequence_number")
         .first()
+    )
+
+    latest_recommendations = []
+    latest_plan_total = Decimal("0.00")
+    latest_plan_remaining_cash = Decimal("0.00")
+
+    if latest_plan_contribution:
+        latest_recommendations = list(
+            Recommendation.objects
+            .filter(
+                contribution=latest_plan_contribution
+            )
+            .select_related(
+                "contribution",
+                "etf",
+            )
+            .order_by("plan_order")
+        )
+
+        latest_plan_total = sum(
+            (
+                recommendation.estimated_cost
+                for recommendation
+                in latest_recommendations
+            ),
+            Decimal("0.00"),
+        ).quantize(Decimal("0.01"))
+
+        final_recommendation = (
+            latest_recommendations[-1]
+        )
+
+        latest_plan_remaining_cash = (
+            final_recommendation.available_cash
+            - final_recommendation.estimated_cost
+        ).quantize(Decimal("0.01"))
+
+    latest_recommendation = (
+        latest_recommendations[0]
+        if latest_recommendations
+        else None
     )
 
     contributions = (
@@ -267,6 +340,12 @@ def dashboard(request):
         "allocation_error": allocation_error,
         "next_priority": next_priority,
         "latest_recommendation": latest_recommendation,
+        "latest_plan_contribution": latest_plan_contribution,
+        "latest_recommendations": latest_recommendations,
+        "latest_plan_total": latest_plan_total,
+        "latest_plan_remaining_cash": (
+            latest_plan_remaining_cash
+        ),
         "contributions": contributions,
         "holdings": holdings,
         "configured_targets": configured_targets,
@@ -284,26 +363,56 @@ def recommendation_review(
     request,
     sequence_number,
 ):
-    recommendation = get_object_or_404(
-        Recommendation.objects.select_related(
+    recommendations = get_list_or_404(
+        Recommendation.objects
+        .select_related(
             "contribution",
             "etf",
-        ),
+        )
+        .order_by("plan_order"),
         contribution__sequence_number=sequence_number,
     )
 
-    estimated_remaining_cash = (
-        recommendation.available_cash
-        - recommendation.estimated_cost
+    contribution = recommendations[0].contribution
+
+    recommendation_rows = []
+
+    for recommendation in recommendations:
+        estimated_remaining_cash = (
+            recommendation.available_cash
+            - recommendation.estimated_cost
+        ).quantize(
+            Decimal("0.01")
+        )
+
+        recommendation_rows.append(
+            {
+                "recommendation": recommendation,
+                "estimated_remaining_cash": (
+                    estimated_remaining_cash
+                ),
+            }
+        )
+
+    estimated_plan_total = sum(
+        (
+            recommendation.estimated_cost
+            for recommendation in recommendations
+        ),
+        Decimal("0.00"),
     ).quantize(
         Decimal("0.01")
     )
 
     context = {
-        "recommendation": recommendation,
-        "contribution": recommendation.contribution,
+        "contribution": contribution,
+        "recommendations": recommendations,
+        "recommendation_rows": recommendation_rows,
+        "estimated_plan_total": estimated_plan_total,
         "estimated_remaining_cash": (
-            estimated_remaining_cash
+            recommendation_rows[-1][
+                "estimated_remaining_cash"
+            ]
         ),
     }
 
@@ -314,9 +423,10 @@ def recommendation_review(
     )
 
 @require_http_methods(["GET", "POST"])
-def recommendation_approve(
+def recommendation_execute(
     request,
     sequence_number,
+    plan_order,
 ):
     recommendation = get_object_or_404(
         Recommendation.objects.select_related(
@@ -324,32 +434,63 @@ def recommendation_approve(
             "etf",
         ),
         contribution__sequence_number=sequence_number,
+        plan_order=plan_order,
     )
 
     if request.method == "POST":
-        approval_form = ApprovalConfirmationForm(
-            request.POST
+        execution_form = PurchaseExecutionForm(
+            request.POST,
+            recommendation=recommendation,
         )
 
-        if approval_form.is_valid():
+        if execution_form.is_valid():
             try:
-                recommendation = (
-                    approve_recommendation_workflow(
-                        sequence_number=sequence_number
+                execution, holding_lot, remaining_cash = (
+                    execute_recommendation(
+                        recommendation=recommendation,
+                        trade_date=(
+                            execution_form.cleaned_data[
+                                "trade_date"
+                            ]
+                        ),
+                        price_per_share=(
+                            execution_form.cleaned_data[
+                                "price_per_share"
+                            ]
+                        ),
+                        shares=(
+                            execution_form.cleaned_data[
+                                "shares"
+                            ]
+                        ),
+                        fees=(
+                            execution_form.cleaned_data[
+                                "fees"
+                            ]
+                        ),
+                        broker_reference=(
+                            execution_form.cleaned_data[
+                                "broker_reference"
+                            ]
+                        ),
                     )
                 )
             except WorkflowError as error:
-                messages.error(
-                    request,
+                execution_form.add_error(
+                    None,
                     str(error),
                 )
             else:
                 messages.success(
                     request,
                     (
-                        f"Contribution {sequence_number} "
-                        f"was compliance-approved. "
-                        f"No brokerage order was placed."
+                        f"Recorded purchase "
+                        f"{recommendation.plan_order}: "
+                        f"{execution.shares} "
+                        f"{execution.etf.ticker} at "
+                        f"${execution.price_per_share:.2f}. "
+                        f"Remaining cash: "
+                        f"${remaining_cash:.2f}."
                     ),
                 )
 
@@ -358,16 +499,41 @@ def recommendation_approve(
                     sequence_number=sequence_number,
                 )
     else:
-        approval_form = ApprovalConfirmationForm()
+        execution_form = PurchaseExecutionForm(
+            recommendation=recommendation,
+        )
 
     context = {
         "recommendation": recommendation,
         "contribution": recommendation.contribution,
-        "approval_form": approval_form,
+        "execution_form": execution_form,
     }
 
     return render(
         request,
-        "portfolio/recommendation_approve.html",
+        "portfolio/recommendation_execute.html",
         context,
+    )
+
+@require_http_methods(["GET", "POST"])
+def recommendation_approve(
+    request,
+    sequence_number,
+):
+    get_list_or_404(
+        Recommendation,
+        contribution__sequence_number=sequence_number,
+    )
+
+    messages.info(
+        request,
+        (
+            "Separate approval is no longer required "
+            "for ETF purchases."
+        ),
+    )
+
+    return redirect(
+        "portfolio:recommendation_review",
+        sequence_number=sequence_number,
     )

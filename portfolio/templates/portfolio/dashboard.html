@@ -99,7 +99,7 @@
                     <h2>Add contribution</h2>
                     <p class="panel-note">
                         Add funds to shared cash and generate a draft
-                        target-allocation recommendation.
+                        target-allocation purchase plan.
                     </p>
                 </div>
             </div>
@@ -139,99 +139,145 @@
                 {% endfor %}
 
                 <button type="submit" class="primary-button">
-                    Add contribution &amp; generate recommendation
+                    Add contribution &amp; generate purchase plan
                 </button>
             </form>
 
             <p class="form-safety-note">
-                This creates a draft recommendation only. It does not approve
-                or place a brokerage order.
+                This creates a draft purchase plan only. It does not place
+                a brokerage order.
             </p>
         </section>
 
         <section class="panel recommendation-panel">
             <div class="panel-heading">
                 <div>
-                    <p class="eyebrow">LATEST DECISION</p>
-                    <h2>Contribution recommendation</h2>
-                </div>
+                    <p class="eyebrow">LATEST PLAN</p>
+                    <h2>Latest purchase plan</h2>
 
-                {% if latest_recommendation %}
-                    <span class="status">
-                        {{ latest_recommendation.get_status_display }}
-                    </span>
-                {% endif %}
+                    {% if latest_plan_contribution %}
+                        <p class="panel-note">
+                            Contribution #{{ latest_plan_contribution.sequence_number }}
+                        </p>
+                    {% endif %}
+                </div>
             </div>
 
-            {% if latest_recommendation %}
-                <div class="recommendation">
-                    <div class="recommendation-action">
-                        <span class="action">
-                            {{ latest_recommendation.get_action_display }}
-                        </span>
-
+            {% if latest_recommendations %}
+                <div class="recommendation-details">
+                    <div class="detail-box">
+                        <span>Total planned</span>
                         <strong>
-                            {% if latest_recommendation.shares %}
-                                {{ latest_recommendation.shares }}
-                                {{ latest_recommendation.etf.ticker }}
-                            {% else %}
-                                for
-                                {{ latest_recommendation.etf.ticker }}
-                            {% endif %}
+                            ${{ latest_plan_total|floatformat:2 }}
                         </strong>
                     </div>
 
-                    <dl class="decision-details">
-                        <div>
-                            <dt>Contribution</dt>
-                            <dd>
-                                #{{ latest_recommendation.contribution.sequence_number }}
-                            </dd>
-                        </div>
+                    <div class="detail-box">
+                        <span>Cash carried forward</span>
+                        <strong>
+                            ${{ latest_plan_remaining_cash|floatformat:2 }}
+                        </strong>
+                    </div>
 
-                        <div>
-                            <dt>Shared cash</dt>
-                            <dd>
-                                ${{ latest_recommendation.available_cash|floatformat:2 }}
-                            </dd>
-                        </div>
+                    <div class="detail-box">
+                        <span>Purchases</span>
+                        <strong>
+                            {{ latest_recommendations|length }}
+                        </strong>
+                    </div>
 
-                        <div>
-                            <dt>Reference price</dt>
-                            <dd>
-                                ${{ latest_recommendation.reference_price|floatformat:2 }}
-                            </dd>
-                        </div>
-
-                        <div>
-                            <dt>Estimated cost</dt>
-                            <dd>
-                                ${{ latest_recommendation.estimated_cost|floatformat:2 }}
-                            </dd>
-                        </div>
-                    </dl>
-
-                    <p class="reason">
-                        {{ latest_recommendation.reason }}
-                    </p>
-
-                    <p class="warning">
-                        Draft recommendation only. Compliance approval
-                        and manual Merrill execution are required.
-                    </p>
+                    <div class="detail-box">
+                        <span>Contribution</span>
+                        <strong>
+                            #{{ latest_plan_contribution.sequence_number }}
+                        </strong>
+                    </div>
                 </div>
+
+                <div class="purchase-plan-list">
+                    {% for recommendation in latest_recommendations %}
+                        <article class="purchase-plan-item">
+                            <div class="purchase-plan-heading">
+                                <div>
+                                    <p class="purchase-plan-number">
+                                        Purchase {{ recommendation.plan_order }}
+                                    </p>
+
+                                    <div class="recommendation-action">
+                                        <span class="verb">
+                                            {{ recommendation.get_action_display }}
+                                        </span>
+
+                                        <strong>
+                                            {% if recommendation.shares %}
+                                                {{ recommendation.shares }} {{ recommendation.etf.ticker }}
+                                            {% else %}
+                                                {{ recommendation.etf.ticker }}
+                                            {% endif %}
+                                        </strong>
+                                    </div>
+                                </div>
+
+                                <span class="status {{ recommendation.status|lower }}">
+                                    {{ recommendation.get_status_display }}
+                                </span>
+                            </div>
+
+                            <div class="recommendation-details">
+                                <div class="detail-box">
+                                    <span>Available cash</span>
+                                    <strong>
+                                        ${{ recommendation.available_cash|floatformat:2 }}
+                                    </strong>
+                                </div>
+
+                                <div class="detail-box">
+                                    <span>Reference price</span>
+                                    <strong>
+                                        ${{ recommendation.reference_price|floatformat:2 }}
+                                    </strong>
+                                </div>
+
+                                <div class="detail-box">
+                                    <span>Estimated cost</span>
+                                    <strong>
+                                        ${{ recommendation.estimated_cost|floatformat:2 }}
+                                    </strong>
+                                </div>
+
+                                <div class="detail-box">
+                                    <span>Price date</span>
+                                    <strong>
+                                        {{ recommendation.price_date }}
+                                    </strong>
+                                </div>
+                            </div>
+
+                            <p class="reason">
+                                {{ recommendation.reason }}
+                            </p>
+                        </article>
+                    {% endfor %}
+                </div>
+
+                <p class="purchase-plan-note">
+                    Draft purchase plan only. Execute purchases
+                    manually at Merrill, then record each actual
+                    execution in vaporFUND.
+                </p>
                 <a
                     class="review-link"
-                    href="{% url 'portfolio:recommendation_review' latest_recommendation.contribution.sequence_number %}"
+                    href="{% url 'portfolio:recommendation_review' latest_plan_contribution.sequence_number %}"
                 >
-                    Review recommendation
+                    Review purchase plan
                 </a>
+
             {% else %}
                 <div class="empty-state">
-                    <strong>No recommendation yet</strong>
+                    <strong>No purchase plan yet</strong>
                     <p>
-                        Record the first contribution, then generate
-                        a target-allocation recommendation.
+                        Record the first contribution to generate
+                        a target-allocation purchase plan.
                     </p>
                 </div>
             {% endif %}

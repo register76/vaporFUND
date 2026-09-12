@@ -24,6 +24,7 @@ from .models import (
 from .services import (
     AllocationError,
     calculate_allocation,
+    calculate_purchase_plan,
     choose_share_quantity,
 )
 
@@ -390,6 +391,46 @@ class AllocationServiceTests(TestCase):
             Decimal("70.00"),
         )
 
+    def test_purchase_plan_recalculates_after_each_buy(self):
+        ETF.objects.update(target_percent=0)
+
+        schb = self.etfs["SCHB"]
+        schb.target_percent = 50
+        schb.save(update_fields=["target_percent"])
+
+        vteb = self.etfs["VTEB"]
+        vteb.target_percent = 50
+        vteb.save(update_fields=["target_percent"])
+
+        self.add_cash(amount="200.00")
+
+        plan = calculate_purchase_plan(
+            date(2026, 8, 31)
+        )
+
+        self.assertEqual(len(plan.decisions), 2)
+
+        first, second = plan.decisions
+
+        self.assertEqual(first.selected.etf, vteb)
+        self.assertEqual(first.shares, 2)
+        self.assertEqual(
+            first.estimated_cost,
+            Decimal("100.00"),
+        )
+
+        self.assertEqual(second.selected.etf, schb)
+        self.assertEqual(second.shares, 3)
+        self.assertEqual(
+            second.estimated_cost,
+            Decimal("90.00"),
+        )
+
+        self.assertEqual(
+            plan.remaining_cash,
+            Decimal("10.00"),
+        )
+
     def test_unaffordable_selected_etf_holds_cash(self):
         ETF.objects.update(target_percent=0)
 
@@ -665,6 +706,84 @@ class RecommendationCommandTests(TestCase):
             output,
         )
 
+    def test_command_creates_ordered_purchase_plan(self):
+        ETF.objects.update(target_percent=0)
+
+        schb = self.etfs["SCHB"]
+        schb.target_percent = 50
+        schb.save(update_fields=["target_percent"])
+
+        vteb = self.etfs["VTEB"]
+        vteb.target_percent = 50
+        vteb.save(update_fields=["target_percent"])
+
+        self.contribution.amount = Decimal("200.00")
+        self.contribution.save(update_fields=["amount"])
+
+        cash_transaction = (
+            self.contribution.cash_transaction
+        )
+        cash_transaction.amount = Decimal("200.00")
+        cash_transaction.save(update_fields=["amount"])
+
+        output = self.generate()
+
+        recommendations = list(
+            Recommendation.objects.filter(
+                contribution=self.contribution
+            ).order_by("plan_order")
+        )
+
+        self.assertEqual(len(recommendations), 2)
+
+        first, second = recommendations
+
+        self.assertEqual(first.plan_order, 1)
+        self.assertEqual(first.etf, vteb)
+        self.assertEqual(first.shares, 2)
+        self.assertEqual(
+            first.available_cash,
+            Decimal("200.00"),
+        )
+        self.assertEqual(
+            first.estimated_cost,
+            Decimal("100.00"),
+        )
+
+        self.assertEqual(second.plan_order, 2)
+        self.assertEqual(second.etf, schb)
+        self.assertEqual(second.shares, 3)
+        self.assertEqual(
+            second.available_cash,
+            Decimal("100.00"),
+        )
+        self.assertEqual(
+            second.estimated_cost,
+            Decimal("90.00"),
+        )
+
+        self.assertIn(
+            "Purchase 1: BUY 2 VTEB",
+            output,
+        )
+        self.assertIn(
+            "Purchase 2: BUY 3 SCHB",
+            output,
+        )
+        self.assertIn(
+            "Total estimated purchases: $190.00",
+            output,
+        )
+        self.assertIn(
+            "Estimated remaining cash: $10.00",
+            output,
+        )
+        self.assertNotIn(
+            "Compliance approval",
+            output,
+        )
+
+
     def test_regenerating_draft_is_idempotent(self):
         first_output = self.generate()
         first = Recommendation.objects.get()
@@ -915,12 +1034,15 @@ class PurchaseConfirmationTests(TestCase):
         self,
         price="30.00",
         shares=1,
+        plan_order=1,
     ):
+
         output = StringIO()
 
         call_command(
             "confirm_purchase",
             contribution=1,
+            plan_order=plan_order,
             price=price,
             shares=shares,
             trade_date="2026-08-31",
@@ -930,17 +1052,79 @@ class PurchaseConfirmationTests(TestCase):
 
         return output.getvalue()
 
-    def test_purchase_requires_approval(self):
-        with self.assertRaisesMessage(
-            CommandError,
-            "has not been compliance-approved",
-        ):
-            self.confirm()
+    def test_can_execute_second_plan_item_independently(
+        self,
+    ):
+        second_recommendation = (
+            Recommendation.objects.get(
+                pk=self.recommendation.pk
+            )
+        )
+        second_recommendation.pk = None
+        second_recommendation._state.adding = True
+        second_recommendation.plan_order = 2
+        second_recommendation.status = (
+            Recommendation.Status.COMPLIANCE_APPROVED
+        )
+        second_recommendation.save()
 
-        self.assertFalse(
-            TradeExecution.objects.exists()
+        self.confirm(plan_order=2)
+
+        self.recommendation.refresh_from_db()
+        second_recommendation.refresh_from_db()
+        self.contribution.refresh_from_db()
+
+        execution = TradeExecution.objects.get()
+
+        self.assertEqual(
+            execution.recommendation,
+            second_recommendation,
+        )
+        self.assertEqual(
+            second_recommendation.status,
+            Recommendation.Status.EXECUTED,
+        )
+        self.assertEqual(
+            self.recommendation.status,
+            Recommendation.Status.DRAFT,
         )
         self.assertFalse(
+            self.contribution.processed
+        )
+
+        self.confirm(plan_order=1)
+
+        self.contribution.refresh_from_db()
+
+        self.assertTrue(
+            self.contribution.processed
+        )
+        self.assertEqual(
+            TradeExecution.objects.count(),
+            2,
+        )
+        self.assertEqual(
+            HoldingLot.objects.count(),
+            2,
+        )
+
+    def test_draft_purchase_can_execute_without_approval(
+        self,
+    ):
+        self.confirm()
+
+        self.recommendation.refresh_from_db()
+
+        self.assertEqual(
+            self.recommendation.status,
+            Recommendation.Status.EXECUTED,
+        )
+        self.assertTrue(
+            TradeExecution.objects.filter(
+                recommendation=self.recommendation
+            ).exists()
+        )
+        self.assertTrue(
             HoldingLot.objects.exists()
         )
 
@@ -1045,6 +1229,28 @@ class PurchaseConfirmationTests(TestCase):
             1,
         )
 
+    def test_cancelled_recommendation_cannot_execute(
+        self,
+    ):
+        self.recommendation.status = (
+            Recommendation.Status.CANCELLED
+        )
+        self.recommendation.save(
+            update_fields=["status"]
+        )
+
+        with self.assertRaisesMessage(
+            CommandError,
+            "Only draft or compliance-approved",
+        ):
+            self.confirm()
+
+        self.assertFalse(
+            TradeExecution.objects.exists()
+        )
+        self.assertFalse(
+            HoldingLot.objects.exists()
+        )
 
 class DashboardContributionTests(TestCase):
     def setUp(self):
@@ -1142,7 +1348,7 @@ class DashboardContributionTests(TestCase):
         )
         self.assertContains(
             response,
-            "generate recommendation",
+            "generate purchase plan",
         )
 
     def test_post_creates_contribution_deposit_and_draft(self):
@@ -1212,7 +1418,84 @@ class DashboardContributionTests(TestCase):
 
         self.assertContains(
             response,
-            "Draft recommendation: buy 1 SCHB",
+            "Draft purchase plan: buy 1 SCHB",
+        )
+
+    def test_dashboard_displays_complete_purchase_plan(self):
+        ETF.objects.update(target_percent=0)
+
+        schb = self.etfs["SCHB"]
+        schb.target_percent = 50
+        schb.save(update_fields=["target_percent"])
+
+        vteb = self.etfs["VTEB"]
+        vteb.target_percent = 50
+        vteb.save(update_fields=["target_percent"])
+
+        response = self.post_contribution(
+            amount="200.00",
+        )
+
+        recommendations = list(
+            response.context["latest_recommendations"]
+        )
+
+        self.assertEqual(len(recommendations), 2)
+        self.assertEqual(
+            [item.plan_order for item in recommendations],
+            [1, 2],
+        )
+
+        self.assertContains(
+            response,
+            "Latest purchase plan",
+        )
+        self.assertContains(
+            response,
+            "Contribution #1",
+        )
+        self.assertContains(
+            response,
+            "Purchase 1",
+        )
+        self.assertContains(
+            response,
+            "2 VTEB",
+        )
+        self.assertContains(
+            response,
+            "Purchase 2",
+        )
+        self.assertContains(
+            response,
+            "3 SCHB",
+        )
+        self.assertContains(
+            response,
+            "Total planned",
+        )
+        self.assertContains(
+            response,
+            "$190.00",
+        )
+        self.assertContains(
+            response,
+            "Cash carried forward",
+        )
+        self.assertContains(
+            response,
+            "$10.00",
+        )
+        self.assertNotContains(
+            response,
+            "Compliance approval",
+        )
+        self.assertContains(
+            response,
+            (
+                "Draft purchase plan: buy 2 VTEB, "
+                "then buy 3 SCHB"
+            ),
         )
 
     def test_zero_amount_is_rejected_by_server(self):
@@ -1267,6 +1550,37 @@ class DashboardContributionTests(TestCase):
             1,
         )
 
+    def test_new_contribution_is_blocked_while_plan_pending(
+        self,
+    ):
+        self.post_contribution(
+            contribution_date="2026-09-01",
+        )
+
+        response = self.post_contribution(
+            contribution_date="2026-09-08",
+        )
+
+        self.assertContains(
+            response,
+            (
+                "Contribution 1 still has an active "
+                "purchase plan"
+            ),
+        )
+        self.assertEqual(
+            Contribution.objects.count(),
+            1,
+        )
+        self.assertEqual(
+            CashTransaction.objects.count(),
+            1,
+        )
+        self.assertEqual(
+            Recommendation.objects.count(),
+            1,
+        )
+
     def test_failure_to_generate_rolls_back_deposit(self):
         PriceHistory.objects.filter(
             etf=self.etfs["VTEB"]
@@ -1290,7 +1604,7 @@ class DashboardContributionTests(TestCase):
             Recommendation.objects.exists()
         )
 
-    def test_review_page_displays_stored_recommendation(self):
+    def test_review_page_displays_stored_purchase_plan(self):
         self.post_contribution()
 
         recommendation = Recommendation.objects.get()
@@ -1327,7 +1641,7 @@ class DashboardContributionTests(TestCase):
         )
         self.assertContains(
             response,
-            "Recommendation review",
+            "Purchase plan review",
         )
         self.assertContains(response, "SCHB")
         self.assertContains(
@@ -1335,6 +1649,46 @@ class DashboardContributionTests(TestCase):
             "No brokerage action has occurred",
         )
         self.assertEqual(before, after)
+
+    def test_multi_purchase_plan_can_be_reviewed(self):
+        self.post_contribution()
+
+        recommendation = Recommendation.objects.get()
+        sequence_number = (
+            recommendation.contribution.sequence_number
+        )
+
+        recommendation.pk = None
+        recommendation.plan_order = 2
+        recommendation.save()
+
+        review_url = reverse(
+            "portfolio:recommendation_review",
+            args=[sequence_number],
+        )
+
+        response = self.client.get(review_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Purchase 1")
+        self.assertContains(response, "Purchase 2")
+        self.assertNotContains(
+            response,
+            "Continue to approval",
+        )
+
+        dashboard_response = self.client.get(
+            reverse("portfolio:dashboard")
+        )
+
+        self.assertContains(
+            dashboard_response,
+            "Review purchase plan",
+        )
+        self.assertContains(
+            dashboard_response,
+            review_url,
+        )
 
     def test_review_page_returns_404_for_unknown_contribution(self):
         url = reverse(
@@ -1372,44 +1726,54 @@ class DashboardContributionTests(TestCase):
             Recommendation.Status.DRAFT,
         )
 
-    def approval_url(self):
-        recommendation = Recommendation.objects.get()
-
-        return reverse(
-            "portfolio:recommendation_approve",
-            args=[
-                recommendation.contribution.sequence_number
-            ],
-        )
-
-    def test_approval_page_is_read_only_on_get(self):
+    def test_legacy_approval_url_redirects_without_mutation(
+        self,
+    ):
         self.post_contribution()
 
         recommendation = Recommendation.objects.get()
-        cash_before = CashTransaction.objects.count()
-
-        response = self.client.get(
-            self.approval_url()
+        sequence_number = (
+            recommendation.contribution.sequence_number
         )
 
-        recommendation.refresh_from_db()
+        recommendation.pk = None
+        recommendation.plan_order = 2
+        recommendation.save()
 
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(
-            response,
-            "portfolio/recommendation_approve.html",
+        approval_url = reverse(
+            "portfolio:recommendation_approve",
+            args=[sequence_number],
         )
-        self.assertContains(
-            response,
-            "Approve this recommendation?",
+        review_url = reverse(
+            "portfolio:recommendation_review",
+            args=[sequence_number],
         )
-        self.assertEqual(
-            recommendation.status,
-            Recommendation.Status.DRAFT,
+
+        transaction_count = (
+            CashTransaction.objects.count()
+        )
+
+        for method in ["get", "post"]:
+            with self.subTest(method=method):
+                response = getattr(
+                    self.client,
+                    method,
+                )(approval_url)
+
+                self.assertRedirects(
+                    response,
+                    review_url,
+                    fetch_redirect_response=False,
+                )
+
+        self.assertFalse(
+            Recommendation.objects.exclude(
+                status=Recommendation.Status.DRAFT
+            ).exists()
         )
         self.assertEqual(
             CashTransaction.objects.count(),
-            cash_before,
+            transaction_count,
         )
         self.assertFalse(
             TradeExecution.objects.exists()
@@ -1418,14 +1782,199 @@ class DashboardContributionTests(TestCase):
             HoldingLot.objects.exists()
         )
 
-    def test_approval_requires_confirmation_checkbox(self):
+    def test_web_purchase_execution_records_ledger(self):
+        self.post_contribution()
+
+        recommendation = Recommendation.objects.get()
+        contribution = recommendation.contribution
+
+        execute_url = reverse(
+            "portfolio:recommendation_execute",
+            args=[
+                contribution.sequence_number,
+                recommendation.plan_order,
+            ],
+        )
+        review_url = reverse(
+            "portfolio:recommendation_review",
+            args=[contribution.sequence_number],
+        )
+
+        transaction_count = (
+            CashTransaction.objects.count()
+        )
+
+        response = self.client.post(
+            execute_url,
+            {
+                "trade_date": "2026-09-01",
+                "price_per_share": "30.00",
+                "shares": "1",
+                "fees": "0.00",
+                "broker_reference": "MERRILL-TEST",
+                "confirm_execution": "on",
+            },
+            follow=True,
+        )
+
+        recommendation.refresh_from_db()
+        contribution.refresh_from_db()
+
+        execution = TradeExecution.objects.get(
+            recommendation=recommendation
+        )
+        holding_lot = HoldingLot.objects.get(
+            execution=execution
+        )
+
+        self.assertRedirects(response, review_url)
+        self.assertEqual(
+            recommendation.status,
+            Recommendation.Status.EXECUTED,
+        )
+        self.assertTrue(contribution.processed)
+        self.assertEqual(
+            CashTransaction.objects.count(),
+            transaction_count + 1,
+        )
+        self.assertEqual(
+            execution.total_cost,
+            Decimal("30.00"),
+        )
+        self.assertEqual(
+            execution.broker_reference,
+            "MERRILL-TEST",
+        )
+        self.assertEqual(
+            holding_lot.shares_remaining,
+            1,
+        )
+
+    def test_web_purchase_execution_form_is_prefilled(
+        self,
+    ):
         self.post_contribution()
 
         recommendation = Recommendation.objects.get()
 
+        execute_url = reverse(
+            "portfolio:recommendation_execute",
+            args=[
+                recommendation.contribution.sequence_number,
+                recommendation.plan_order,
+            ],
+        )
+
+        transaction_count = (
+            CashTransaction.objects.count()
+        )
+
+        response = self.client.get(execute_url)
+
+        recommendation.refresh_from_db()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(
+            response,
+            "portfolio/recommendation_execute.html",
+        )
+        self.assertContains(
+            response,
+            "Record completed purchase",
+        )
+        self.assertEqual(
+            response.context["execution_form"][
+                "shares"
+            ].value(),
+            recommendation.shares,
+        )
+        self.assertEqual(
+            response.context["execution_form"][
+                "price_per_share"
+            ].value(),
+            recommendation.reference_price,
+        )
+        self.assertEqual(
+            recommendation.status,
+            Recommendation.Status.DRAFT,
+        )
+        self.assertEqual(
+            CashTransaction.objects.count(),
+            transaction_count,
+        )
+        self.assertFalse(
+            TradeExecution.objects.exists()
+        )
+        self.assertFalse(
+            HoldingLot.objects.exists()
+        )
+
+    def test_purchase_plan_links_only_executable_items(
+        self,
+    ):
+        self.post_contribution()
+
+        recommendation = Recommendation.objects.get()
+        contribution = recommendation.contribution
+
+        review_url = reverse(
+            "portfolio:recommendation_review",
+            args=[contribution.sequence_number],
+        )
+        execute_url = reverse(
+            "portfolio:recommendation_execute",
+            args=[
+                contribution.sequence_number,
+                recommendation.plan_order,
+            ],
+        )
+
+        response = self.client.get(review_url)
+
+        self.assertContains(response, "Record purchase")
+        self.assertContains(response, execute_url)
+
+        self.client.post(
+            execute_url,
+            {
+                "trade_date": "2026-09-01",
+                "price_per_share": "30.00",
+                "shares": "1",
+                "fees": "0.00",
+                "broker_reference": "",
+                "confirm_execution": "on",
+            },
+        )
+
+        response = self.client.get(review_url)
+
+        self.assertNotContains(response, execute_url)
+
+    def test_web_purchase_execution_requires_confirmation(
+        self,
+    ):
+        self.post_contribution()
+
+        recommendation = Recommendation.objects.get()
+        cash_count = CashTransaction.objects.count()
+
+        execute_url = reverse(
+            "portfolio:recommendation_execute",
+            args=[
+                recommendation.contribution.sequence_number,
+                recommendation.plan_order,
+            ],
+        )
+
         response = self.client.post(
-            self.approval_url(),
-            {},
+            execute_url,
+            {
+                "trade_date": "2026-09-01",
+                "price_per_share": "30.00",
+                "shares": "1",
+                "fees": "0.00",
+                "broker_reference": "",
+            },
         )
 
         recommendation.refresh_from_db()
@@ -1439,6 +1988,10 @@ class DashboardContributionTests(TestCase):
             recommendation.status,
             Recommendation.Status.DRAFT,
         )
+        self.assertEqual(
+            CashTransaction.objects.count(),
+            cash_count,
+        )
         self.assertFalse(
             TradeExecution.objects.exists()
         )
@@ -1446,48 +1999,48 @@ class DashboardContributionTests(TestCase):
             HoldingLot.objects.exists()
         )
 
-    def test_confirmed_web_approval_changes_only_status(self):
+    def test_web_purchase_execution_rejects_extra_shares(
+        self,
+    ):
         self.post_contribution()
 
         recommendation = Recommendation.objects.get()
+        cash_count = CashTransaction.objects.count()
 
-        transaction_count = (
-            CashTransaction.objects.count()
-        )
-        cash_total = (
-            CashTransaction.objects.aggregate(
-                total=Sum("amount")
-            )["total"]
+        execute_url = reverse(
+            "portfolio:recommendation_execute",
+            args=[
+                recommendation.contribution.sequence_number,
+                recommendation.plan_order,
+            ],
         )
 
         response = self.client.post(
-            self.approval_url(),
+            execute_url,
             {
-                "confirm_approval": "on",
+                "trade_date": "2026-09-01",
+                "price_per_share": "30.00",
+                "shares": str(recommendation.shares + 1),
+                "fees": "0.00",
+                "broker_reference": "",
+                "confirm_execution": "on",
             },
-            follow=True,
         )
 
         recommendation.refresh_from_db()
 
         self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "shares",
+            response.context["execution_form"].errors,
+        )
         self.assertEqual(
             recommendation.status,
-            Recommendation.Status.COMPLIANCE_APPROVED,
-        )
-        self.assertContains(
-            response,
-            "No brokerage order was placed",
+            Recommendation.Status.DRAFT,
         )
         self.assertEqual(
             CashTransaction.objects.count(),
-            transaction_count,
-        )
-        self.assertEqual(
-            CashTransaction.objects.aggregate(
-                total=Sum("amount")
-            )["total"],
-            cash_total,
+            cash_count,
         )
         self.assertFalse(
             TradeExecution.objects.exists()
@@ -1496,85 +2049,99 @@ class DashboardContributionTests(TestCase):
             HoldingLot.objects.exists()
         )
 
-    def test_web_approval_cannot_be_repeated(self):
+    def test_web_purchase_execution_cannot_be_repeated(
+        self,
+    ):
         self.post_contribution()
 
-        url = self.approval_url()
+        recommendation = Recommendation.objects.get()
+
+        execute_url = reverse(
+            "portfolio:recommendation_execute",
+            args=[
+                recommendation.contribution.sequence_number,
+                recommendation.plan_order,
+            ],
+        )
+        execution_data = {
+            "trade_date": "2026-09-01",
+            "price_per_share": "30.00",
+            "shares": "1",
+            "fees": "0.00",
+            "broker_reference": "",
+            "confirm_execution": "on",
+        }
 
         first_response = self.client.post(
-            url,
-            {
-                "confirm_approval": "on",
-            },
-            follow=True,
+            execute_url,
+            execution_data,
         )
+
+        cash_count = CashTransaction.objects.count()
 
         second_response = self.client.post(
-            url,
-            {
-                "confirm_approval": "on",
-            },
-            follow=True,
-        )
-
-        recommendation = Recommendation.objects.get()
-
-        self.assertEqual(
-            first_response.status_code,
-            200,
-        )
-        self.assertEqual(
-            second_response.status_code,
-            200,
-        )
-        self.assertContains(
-            second_response,
-            "Only a draft recommendation can be approved.",
-        )
-        self.assertEqual(
-            recommendation.status,
-            Recommendation.Status.COMPLIANCE_APPROVED,
-        )
-        self.assertFalse(
-            TradeExecution.objects.exists()
-        )
-        self.assertFalse(
-            HoldingLot.objects.exists()
-        )
-
-    def test_hold_cash_cannot_be_web_approved(self):
-        self.post_contribution()
-
-        recommendation = Recommendation.objects.get()
-        recommendation.action = (
-            Recommendation.Action.HOLD_CASH
-        )
-        recommendation.shares = 0
-        recommendation.estimated_cost = Decimal("0.00")
-        recommendation.save(
-            update_fields=[
-                "action",
-                "shares",
-                "estimated_cost",
-                "updated_at",
-            ]
-        )
-
-        response = self.client.post(
-            self.approval_url(),
-            {
-                "confirm_approval": "on",
-            },
-            follow=True,
+            execute_url,
+            execution_data,
         )
 
         recommendation.refresh_from_db()
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(
-            response,
-            "A hold-cash recommendation has no purchase to approve.",
+        self.assertEqual(first_response.status_code, 302)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertTrue(
+            second_response.context[
+                "execution_form"
+            ].non_field_errors()
         )
+        self.assertEqual(
+            recommendation.status,
+            Recommendation.Status.EXECUTED,
+        )
+        self.assertEqual(
+            CashTransaction.objects.count(),
+            cash_count,
+        )
+        self.assertEqual(
+            TradeExecution.objects.count(),
+            1,
+        )
+        self.assertEqual(
+            HoldingLot.objects.count(),
+            1,
+        )
+
+    def test_web_purchase_execution_returns_404_for_unknown_item(
+        self,
+    ):
+        self.post_contribution()
+
+        recommendation = Recommendation.objects.get()
+        sequence_number = (
+            recommendation.contribution.sequence_number
+        )
+
+        urls = [
+            reverse(
+                "portfolio:recommendation_execute",
+                args=[999, 1],
+            ),
+            reverse(
+                "portfolio:recommendation_execute",
+                args=[sequence_number, 999],
+            ),
+        ]
+
+        for url in urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+
+                self.assertEqual(
+                    response.status_code,
+                    404,
+                )
+
+        recommendation.refresh_from_db()
+
         self.assertEqual(
             recommendation.status,
             Recommendation.Status.DRAFT,
@@ -1584,4 +2151,95 @@ class DashboardContributionTests(TestCase):
         )
         self.assertFalse(
             HoldingLot.objects.exists()
+        )
+
+    def test_web_execution_processes_multi_purchase_plan_independently(
+        self,
+    ):
+        self.post_contribution()
+
+        recommendation = Recommendation.objects.get()
+        recommendation.pk = None
+        recommendation.plan_order = 2
+        recommendation.save()
+
+        recommendations = list(
+            Recommendation.objects.order_by("plan_order")
+        )
+        first_recommendation = recommendations[0]
+        second_recommendation = recommendations[1]
+        contribution = first_recommendation.contribution
+
+        first_execute_url = reverse(
+            "portfolio:recommendation_execute",
+            args=[
+                contribution.sequence_number,
+                first_recommendation.plan_order,
+            ],
+        )
+        second_execute_url = reverse(
+            "portfolio:recommendation_execute",
+            args=[
+                contribution.sequence_number,
+                second_recommendation.plan_order,
+            ],
+        )
+        execution_data = {
+            "trade_date": "2026-09-01",
+            "price_per_share": "30.00",
+            "shares": "1",
+            "fees": "0.00",
+            "broker_reference": "",
+            "confirm_execution": "on",
+        }
+
+        first_response = self.client.post(
+            first_execute_url,
+            execution_data,
+        )
+
+        first_recommendation.refresh_from_db()
+        second_recommendation.refresh_from_db()
+        contribution.refresh_from_db()
+
+        self.assertEqual(first_response.status_code, 302)
+        self.assertEqual(
+            first_recommendation.status,
+            Recommendation.Status.EXECUTED,
+        )
+        self.assertEqual(
+            second_recommendation.status,
+            Recommendation.Status.DRAFT,
+        )
+        self.assertFalse(contribution.processed)
+        self.assertEqual(
+            TradeExecution.objects.count(),
+            1,
+        )
+        self.assertEqual(
+            HoldingLot.objects.count(),
+            1,
+        )
+
+        second_response = self.client.post(
+            second_execute_url,
+            execution_data,
+        )
+
+        second_recommendation.refresh_from_db()
+        contribution.refresh_from_db()
+
+        self.assertEqual(second_response.status_code, 302)
+        self.assertEqual(
+            second_recommendation.status,
+            Recommendation.Status.EXECUTED,
+        )
+        self.assertTrue(contribution.processed)
+        self.assertEqual(
+            TradeExecution.objects.count(),
+            2,
+        )
+        self.assertEqual(
+            HoldingLot.objects.count(),
+            2,
         )
