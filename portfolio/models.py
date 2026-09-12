@@ -2,6 +2,25 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 
+class Account(models.Model):
+    name = models.CharField(
+        max_length=100,
+        unique=True,
+    )
+    description = models.CharField(
+        max_length=255,
+        blank=True,
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 class ETF(models.Model):
     class AssetClass(models.TextChoices):
         STOCK = "STOCK", "Stock"
@@ -78,6 +97,13 @@ class PriceHistory(models.Model):
 
 
 class Contribution(models.Model):
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.PROTECT,
+        related_name="contributions",
+        null=True,
+        blank=True,
+    )
     date = models.DateField(unique=True)
     amount = models.DecimalField(
         max_digits=12,
@@ -101,6 +127,13 @@ class Contribution(models.Model):
 
 
 class CashTransaction(models.Model):
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.PROTECT,
+        related_name="cash_transactions",
+        null=True,
+        blank=True,
+    )
     class TransactionType(models.TextChoices):
         DEPOSIT = "DEPOSIT", "Deposit"
         PURCHASE = "PURCHASE", "Purchase"
