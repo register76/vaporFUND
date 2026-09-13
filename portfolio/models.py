@@ -104,7 +104,7 @@ class Contribution(models.Model):
         null=True,
         blank=True,
     )
-    date = models.DateField(unique=True)
+    date = models.DateField()
     amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,

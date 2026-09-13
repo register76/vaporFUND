@@ -12,6 +12,7 @@ from django.db.models import Sum
 from django.urls import reverse
 
 from .models import (
+    Account,
     CashTransaction,
     Contribution,
     ETF, 
@@ -26,6 +27,11 @@ from .services import (
     calculate_allocation,
     calculate_purchase_plan,
     choose_share_quantity,
+)
+
+from .workflows import (
+    add_contribution_and_recommend,
+    create_contribution,
 )
 
 class PortfolioConfigurationTests(TestCase):
@@ -2243,4 +2249,220 @@ class DashboardContributionTests(TestCase):
         self.assertEqual(
             HoldingLot.objects.count(),
             2,
+        )
+
+class MultiAccountIsolationTests(TestCase):
+    def setUp(self):
+        self.account_a = Account.objects.create(
+            name="Account A",
+        )
+        self.account_b = Account.objects.create(
+            name="Account B",
+        )
+
+        self.schb = ETF.objects.create(
+            ticker="SCHB-MA",
+            name="SCHB Multi-Account Test",
+            asset_class=ETF.AssetClass.STOCK,
+            target_percent=50,
+            enabled=True,
+        )
+        self.vteb = ETF.objects.create(
+            ticker="VTEB-MA",
+            name="VTEB Multi-Account Test",
+            asset_class=ETF.AssetClass.BOND,
+            target_percent=50,
+            enabled=True,
+        )
+
+        for etf in [self.schb, self.vteb]:
+            PriceHistory.objects.create(
+                etf=etf,
+                date=date(2026, 9, 1),
+                close=Decimal("10.00"),
+                adjusted_close=Decimal("10.00"),
+            )
+
+    def test_cash_is_isolated_by_account(self):
+        CashTransaction.objects.create(
+            account=self.account_a,
+            date=date(2026, 9, 1),
+            transaction_type=(
+                CashTransaction.TransactionType.DEPOSIT
+            ),
+            amount=Decimal("100.00"),
+            description="Account A deposit",
+        )
+
+        CashTransaction.objects.create(
+            account=self.account_b,
+            date=date(2026, 9, 1),
+            transaction_type=(
+                CashTransaction.TransactionType.DEPOSIT
+            ),
+            amount=Decimal("1000.00"),
+            description="Account B deposit",
+        )
+
+        decision_a = calculate_allocation(
+            date(2026, 9, 1),
+            account=self.account_a,
+        )
+        decision_b = calculate_allocation(
+            date(2026, 9, 1),
+            account=self.account_b,
+        )
+
+        self.assertEqual(
+            decision_a.available_cash,
+            Decimal("100.00"),
+        )
+        self.assertEqual(
+            decision_b.available_cash,
+            Decimal("1000.00"),
+        )
+
+    def test_holdings_are_isolated_by_account(self):
+        contribution_a = create_contribution(
+            account=self.account_a,
+            contribution_date=date(2026, 9, 1),
+            amount="100.00",
+        )
+
+        create_contribution(
+            account=self.account_b,
+            contribution_date=date(2026, 9, 1),
+            amount="100.00",
+        )
+
+        recommendation = Recommendation.objects.create(
+            contribution=contribution_a,
+            etf=self.schb,
+            action=Recommendation.Action.BUY,
+            status=Recommendation.Status.EXECUTED,
+            available_cash=Decimal("100.00"),
+            portfolio_value=Decimal("100.00"),
+            current_value=Decimal("0.00"),
+            target_value=Decimal("50.00"),
+            target_shortfall=Decimal("50.00"),
+            reference_price=Decimal("10.00"),
+            price_date=date(2026, 9, 1),
+            shares=5,
+            estimated_cost=Decimal("50.00"),
+            reason="Multi-account isolation test",
+        )
+
+        purchase_cash = CashTransaction.objects.create(
+            account=self.account_a,
+            date=date(2026, 9, 1),
+            transaction_type=(
+                CashTransaction.TransactionType.PURCHASE
+            ),
+            amount=Decimal("-50.00"),
+            description="Account A SCHB purchase",
+        )
+
+        execution = TradeExecution.objects.create(
+            recommendation=recommendation,
+            trade_date=date(2026, 9, 1),
+            etf=self.schb,
+            shares=5,
+            price_per_share=Decimal("10.00"),
+            fees=Decimal("0.00"),
+            total_cost=Decimal("50.00"),
+            cash_transaction=purchase_cash,
+        )
+
+        HoldingLot.objects.create(
+            execution=execution,
+            etf=self.schb,
+            purchase_date=date(2026, 9, 1),
+            shares_acquired=5,
+            shares_remaining=5,
+            price_per_share=Decimal("10.00"),
+            total_cost=Decimal("50.00"),
+            compliance_eligible_date=date(2026, 10, 1),
+        )
+
+        allocation_a = calculate_allocation(
+            date(2026, 9, 1),
+            account=self.account_a,
+        )
+        allocation_b = calculate_allocation(
+            date(2026, 9, 1),
+            account=self.account_b,
+        )
+
+        rows_a = {
+            row.etf.pk: row
+            for row in allocation_a.rows
+        }
+        rows_b = {
+            row.etf.pk: row
+            for row in allocation_b.rows
+        }
+
+        self.assertEqual(
+            rows_a[self.schb.pk].current_shares,
+            5,
+        )
+        self.assertEqual(
+            rows_b[self.schb.pk].current_shares,
+            0,
+        )
+
+    def test_contribution_sequence_is_independent_per_account(self):
+        contribution_a = create_contribution(
+            account=self.account_a,
+            contribution_date=date(2026, 9, 1),
+            amount="100.00",
+        )
+
+        contribution_b = create_contribution(
+            account=self.account_b,
+            contribution_date=date(2026, 9, 1),
+            amount="200.00",
+        )
+
+        self.assertEqual(
+            contribution_a.sequence_number,
+            1,
+        )
+        self.assertEqual(
+            contribution_b.sequence_number,
+            1,
+        )
+
+    def test_active_plan_in_one_account_does_not_block_other(self):
+        contribution_a, _, _ = (
+            add_contribution_and_recommend(
+                account=self.account_a,
+                contribution_date=date(2026, 9, 1),
+                amount="100.00",
+            )
+        )
+
+        contribution_b, _, _ = (
+            add_contribution_and_recommend(
+                account=self.account_b,
+                contribution_date=date(2026, 9, 1),
+                amount="100.00",
+            )
+        )
+
+        self.assertEqual(
+            contribution_a.account,
+            self.account_a,
+        )
+        self.assertEqual(
+            contribution_b.account,
+            self.account_b,
+        )
+        self.assertEqual(
+            contribution_a.sequence_number,
+            1,
+        )
+        self.assertEqual(
+            contribution_b.sequence_number,
+            1,
         )
