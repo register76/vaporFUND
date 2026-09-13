@@ -394,18 +394,18 @@
                         </article>
                     {% endfor %}
                 {% else %}
-                    {% for etf in configured_targets %}
+                    {% for target in configured_targets %}
                         <article class="allocation-row">
                             <div class="allocation-heading">
                                 <div>
-                                    <strong>{{ etf.ticker }}</strong>
-                                    <span>{{ etf.name }}</span>
+                                    <strong>{{ target.etf.ticker }}</strong>
+                                    <span>{{ target.etf.name }}</span>
                                 </div>
 
                                 <div class="allocation-percentages">
                                     <strong>0.0%</strong>
                                     <span>
-                                        / {{ etf.target_percent }}%
+                                        / {{ target.target_percent }}%
                                     </span>
                                 </div>
                             </div>
@@ -413,7 +413,7 @@
                             <div class="allocation-track">
                                 <div
                                     class="target-marker"
-                                    style="left: {{ etf.target_percent }}%;"
+                                    style="left: {{ target.target_percent }}%;"
                                 ></div>
                             </div>
 
@@ -421,7 +421,7 @@
                                 <span>Current $0.00</span>
                                 <span>Awaiting contribution</span>
                                 <span class="underweight">
-                                    {{ etf.target_percent }}% target
+                                    {{ target.target_percent }}% target
                                 </span>
                             </div>
                         </article>

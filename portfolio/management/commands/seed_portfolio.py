@@ -115,25 +115,25 @@ class Command(BaseCommand):
                 f"{etf.get_asset_class_display()}"
             )
 
-            database_total = sum(
-                AccountTarget.objects.filter(
-                    account=account,
-                    target_percent__gt=0,
-                    etf__enabled=True,
-                ).values_list(
-                    "target_percent",
-                    flat=True,
-                )
+        database_total = sum(
+            AccountTarget.objects.filter(
+                account=account,
+                target_percent__gt=0,
+                etf__enabled=True,
+            ).values_list(
+                "target_percent",
+                flat=True,
             )
+        )
 
         if database_total != 100:
             raise CommandError(
-                f"Account targets for {account.name} Enabled database target total "
+                f"Account targets for {account.name} total "
                 f"{database_total}%, not 100%."
             )
 
         self.stdout.write(
             self.style.SUCCESS(
-                "{account_name} target allocation configured: 100%"
+                f"{account.name} target allocation configured: 100%"
             )
         )

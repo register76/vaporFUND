@@ -24,6 +24,7 @@ from .forms import (
 )
 
 from .models import (
+    AccountTarget,
     CashTransaction,
     Contribution,
     ETF,
@@ -35,6 +36,7 @@ from .services import (
     AllocationError,
     calculate_allocation,
     latest_price,
+    resolve_account,
 )
 
 from .workflows import (
@@ -44,6 +46,7 @@ from .workflows import (
 )
 
 def dashboard(request):
+    account = resolve_account()
     if request.method == "POST":
         contribution_form = ContributionForm(
             request.POST
@@ -53,6 +56,7 @@ def dashboard(request):
             try:
                 contribution, recommendation, decision = (
                     add_contribution_and_recommend(
+                        account=account,
                         contribution_date=(
                             contribution_form.cleaned_data[
                                 "contribution_date"
@@ -127,6 +131,7 @@ def dashboard(request):
 
     cash_balance = (
         CashTransaction.objects.filter(
+            account=account,
             date__lte=as_of_date
         ).aggregate(
             total=Sum("amount")
@@ -136,6 +141,7 @@ def dashboard(request):
 
     holding_totals = list(
         HoldingLot.objects.filter(
+            execution__recommendation__contribution__account=account,
             purchase_date__lte=as_of_date,
             shares_remaining__gt=0,
         )
@@ -209,7 +215,8 @@ def dashboard(request):
     if portfolio_value > 0:
         try:
             decision = calculate_allocation(
-                as_of_date
+                as_of_date,
+                account=account,
             )
         except AllocationError as error:
             allocation_error = str(error)
@@ -266,7 +273,10 @@ def dashboard(request):
 
     latest_plan_contribution = (
         Contribution.objects
-        .filter(recommendations__isnull=False)
+        .filter(
+            account=account,
+            recommendations__isnull=False,
+        )
         .distinct()
         .order_by("-sequence_number")
         .first()
@@ -315,14 +325,18 @@ def dashboard(request):
 
     contributions = (
         Contribution.objects
+        .filter(account=account)
         .order_by("-sequence_number")[:10]
     )
 
     configured_targets = (
-        ETF.objects.filter(
-            enabled=True,
+        AccountTarget.objects.filter(
+            account=account,
             target_percent__gt=0,
-        ).order_by("ticker")
+            etf__enabled=True,
+        )
+        .select_related("etf")
+        .order_by("etf__ticker")
     )
 
     context = {
