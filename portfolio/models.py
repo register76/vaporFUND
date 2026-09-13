@@ -21,6 +21,44 @@ class Account(models.Model):
         return self.name
 
 
+class AccountTarget(models.Model):
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.CASCADE,
+        related_name="targets",
+    )
+    etf = models.ForeignKey(
+        "ETF",
+        on_delete=models.PROTECT,
+        related_name="account_targets",
+    )
+    target_percent = models.PositiveSmallIntegerField(
+        validators=[
+            MinValueValidator(0),
+            MaxValueValidator(100),
+        ],
+    )
+
+    class Meta:
+        ordering = [
+            "account__name",
+            "etf__ticker",
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["account", "etf"],
+                name="unique_account_etf_target",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.account.name} — "
+            f"{self.etf.ticker}: "
+            f"{self.target_percent}%"
+        )
+
+
 class ETF(models.Model):
     class AssetClass(models.TextChoices):
         STOCK = "STOCK", "Stock"
