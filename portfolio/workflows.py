@@ -5,6 +5,7 @@ from django.db import transaction
 from django.db.models import Sum
 
 from .models import (
+    Account,
     CashTransaction,
     Contribution,
     HoldingLot,
@@ -25,11 +26,37 @@ class WorkflowError(Exception):
     pass
 
 
+def resolve_account(account=None):
+    if account is not None:
+        return account
+
+    accounts = list(
+        Account.objects.filter(
+            is_active=True
+        ).order_by("id")[:2]
+    )
+
+    if not accounts:
+        raise WorkflowError(
+            "No active vaporFUND account is configured."
+        )
+
+    if len(accounts) > 1:
+        raise WorkflowError(
+            "Multiple active accounts exist. "
+            "An account must be selected."
+        )
+
+    return accounts[0]
+
+
 @transaction.atomic
 def create_contribution(
     contribution_date,
     amount,
+    account=None,
 ):
+    account = resolve_account(account)
     if not isinstance(contribution_date, date):
         raise WorkflowError(
             "A valid contribution date is required."
@@ -48,7 +75,8 @@ def create_contribution(
         )
 
     if Contribution.objects.filter(
-        date=contribution_date
+        account=account,
+        date=contribution_date,
     ).exists():
         raise WorkflowError(
             f"A contribution already exists for "
@@ -58,6 +86,7 @@ def create_contribution(
     previous = (
         Contribution.objects
         .select_for_update()
+        .filter(account=account)
         .order_by("-sequence_number")
         .first()
     )
@@ -69,12 +98,14 @@ def create_contribution(
     )
 
     contribution = Contribution.objects.create(
+        account=account,
         date=contribution_date,
         amount=amount,
         sequence_number=sequence_number,
     )
 
     CashTransaction.objects.create(
+        account=account,
         date=contribution_date,
         transaction_type=(
             CashTransaction.TransactionType.DEPOSIT
@@ -117,7 +148,8 @@ def generate_draft_recommendations(contribution):
 
     try:
         plan = calculate_purchase_plan(
-            contribution.date
+            contribution.date,
+            account=contribution.account,
         )
     except AllocationError as error:
         raise WorkflowError(str(error)) from error
@@ -180,16 +212,21 @@ def generate_draft_recommendation(contribution):
 def add_contribution_and_recommend(
     contribution_date,
     amount,
+    account=None,
 ):
+    account = resolve_account(account)
+
     contribution = create_contribution(
         contribution_date=contribution_date,
         amount=amount,
+        account=account,
     )
 
     active_contribution = (
         Contribution.objects
         .select_for_update()
         .filter(
+            account=account,
             processed=False,
             recommendations__status__in=[
                 Recommendation.Status.DRAFT,
@@ -258,11 +295,19 @@ def execute_recommendation(
         Recommendation.objects
         .select_for_update()
         .select_related(
-            "contribution",
+            "contribution__account",
             "etf",
         )
         .get(pk=recommendation.pk)
     )
+
+    account = recommendation.contribution.account
+
+    if account is None:
+        raise WorkflowError(
+            "The recommendation's contribution "
+            "does not have an account."
+        )
 
     if TradeExecution.objects.filter(
         recommendation=recommendation
@@ -335,6 +380,7 @@ def execute_recommendation(
 
     available_cash = (
         CashTransaction.objects.filter(
+            account=account,
             date__lte=trade_date
         ).aggregate(
             total=Sum("amount")
@@ -350,6 +396,7 @@ def execute_recommendation(
         )
 
     cash_transaction = CashTransaction.objects.create(
+        account=account,
         date=trade_date,
         transaction_type=(
             CashTransaction.TransactionType.PURCHASE

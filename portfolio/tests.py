@@ -547,6 +547,7 @@ class AllocationServiceTests(TestCase):
         )
 
         purchase_cash = CashTransaction.objects.create(
+            account=contribution.account,
             date=date(2026, 8, 31),
             transaction_type=(
                 CashTransaction.TransactionType.PURCHASE

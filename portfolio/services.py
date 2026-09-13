@@ -5,6 +5,7 @@ from decimal import Decimal, ROUND_FLOOR
 from django.db.models import Sum
 
 from .models import (
+    Account,
     CashTransaction,
     ETF,
     HoldingLot,
@@ -19,6 +20,28 @@ PERCENT = Decimal("0.01")
 class AllocationError(Exception):
     pass
 
+def resolve_account(account=None):
+    if account is not None:
+        return account
+
+    accounts = list(
+        Account.objects.filter(
+            is_active=True
+        ).order_by("id")[:2]
+    )
+
+    if not accounts:
+        raise AllocationError(
+            "No active vaporFUND account is configured."
+        )
+
+    if len(accounts) > 1:
+        raise AllocationError(
+            "Multiple active accounts exist. "
+            "An account must be selected."
+        )
+
+    return accounts[0]
 
 @dataclass(frozen=True)
 class AllocationRow:
@@ -79,7 +102,9 @@ def latest_price(etf, as_of_date):
     return price
 
 
-def calculate_allocation(as_of_date):
+def calculate_allocation(as_of_date, account=None):
+    account = resolve_account(account)
+
     target_etfs = list(
         ETF.objects.filter(
             enabled=True,
@@ -105,6 +130,7 @@ def calculate_allocation(as_of_date):
 
     available_cash = (
         CashTransaction.objects.filter(
+            account=account,
             date__lte=as_of_date,
         ).aggregate(
             total=Sum("amount")
@@ -120,6 +146,7 @@ def calculate_allocation(as_of_date):
 
     lot_totals = list(
         HoldingLot.objects.filter(
+            execution__recommendation__contribution__account=account,
             purchase_date__lte=as_of_date,
             shares_remaining__gt=0,
         )
@@ -341,8 +368,13 @@ def choose_share_quantity(
 
     return best_shares
 
-def calculate_purchase_plan(as_of_date):
-    decision = calculate_allocation(as_of_date)
+def calculate_purchase_plan(as_of_date, account=None):
+    account = resolve_account(account)
+
+    decision = calculate_allocation(
+        as_of_date,
+        account=account,
+    )
     decisions = []
 
     while decision.action == "BUY":
