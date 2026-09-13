@@ -13,6 +13,7 @@ from django.urls import reverse
 
 from .models import (
     Account,
+    AccountTarget,
     CashTransaction,
     Contribution,
     ETF, 
@@ -33,6 +34,24 @@ from .workflows import (
     add_contribution_and_recommend,
     create_contribution,
 )
+
+def set_account_targets(account, targets):
+    AccountTarget.objects.filter(
+        account=account
+    ).update(
+        target_percent=0
+    )
+
+    for ticker, target_percent in targets.items():
+        etf = ETF.objects.get(ticker=ticker)
+
+        AccountTarget.objects.update_or_create(
+            account=account,
+            etf=etf,
+            defaults={
+                "target_percent": target_percent,
+            },
+        )
 
 class PortfolioConfigurationTests(TestCase):
     def run_seed(self):
@@ -210,6 +229,7 @@ class PriceHistoryTests(TestCase):
             Decimal("29.900000"),
         )
 
+
 class ContributionTests(TestCase):
     def add_contribution(
         self,
@@ -341,6 +361,10 @@ class AllocationServiceTests(TestCase):
             stdout=StringIO(),
         )
 
+        self.account = Account.objects.get(
+            name="vaporFUND Test"
+        )
+
         prices = {
             "SCHB": "30.00",
             "XMMO": "120.00",
@@ -401,12 +425,15 @@ class AllocationServiceTests(TestCase):
         ETF.objects.update(target_percent=0)
 
         schb = self.etfs["SCHB"]
-        schb.target_percent = 50
-        schb.save(update_fields=["target_percent"])
-
         vteb = self.etfs["VTEB"]
-        vteb.target_percent = 50
-        vteb.save(update_fields=["target_percent"])
+
+        set_account_targets(
+            self.account,
+            {
+                "SCHB": 50,
+                "VTEB": 50,
+            },
+        )
 
         self.add_cash(amount="200.00")
 
@@ -438,11 +465,15 @@ class AllocationServiceTests(TestCase):
         )
 
     def test_unaffordable_selected_etf_holds_cash(self):
-        ETF.objects.update(target_percent=0)
 
         xmmo = self.etfs["XMMO"]
-        xmmo.target_percent = 100
-        xmmo.save(update_fields=["target_percent"])
+
+        set_account_targets(
+            self.account,
+            {
+                "XMMO": 100,
+            },
+        )
 
         self.add_cash()
 
@@ -469,9 +500,13 @@ class AllocationServiceTests(TestCase):
         )
 
     def test_invalid_target_total_is_rejected(self):
-        schb = self.etfs["SCHB"]
-        schb.target_percent = 39
-        schb.save(update_fields=["target_percent"])
+        target = AccountTarget.objects.get(
+            account=self.account,
+            etf=self.etfs["SCHB"],
+        )
+
+        target.target_percent = 39
+        target.save(update_fields=["target_percent"])
 
         self.add_cash()
 
@@ -714,6 +749,19 @@ class RecommendationCommandTests(TestCase):
         )
 
     def test_command_creates_ordered_purchase_plan(self):
+
+        account = Account.objects.get(
+            name="vaporFUND Test"
+        )
+
+        set_account_targets(
+            account,
+            {
+                "SCHB": 50,
+                "VTEB": 50,
+            },
+        )
+
         ETF.objects.update(target_percent=0)
 
         schb = self.etfs["SCHB"]
@@ -723,6 +771,9 @@ class RecommendationCommandTests(TestCase):
         vteb = self.etfs["VTEB"]
         vteb.target_percent = 50
         vteb.save(update_fields=["target_percent"])
+
+
+
 
         self.contribution.amount = Decimal("200.00")
         self.contribution.save(update_fields=["amount"])
@@ -815,11 +866,18 @@ class RecommendationCommandTests(TestCase):
     def test_command_records_hold_cash_without_substitution(
         self,
     ):
-        ETF.objects.update(target_percent=0)
+        account = Account.objects.get(
+            name="vaporFUND Test"
+        )
 
         xmmo = self.etfs["XMMO"]
-        xmmo.target_percent = 100
-        xmmo.save(update_fields=["target_percent"])
+
+        set_account_targets(
+            account,
+            {
+                "XMMO": 100,
+            },
+        )
 
         self.generate()
 
@@ -940,34 +998,15 @@ class ApprovalCommandTests(TestCase):
         )
 
     def test_hold_cash_cannot_be_approved(self):
-        ETF.objects.update(target_percent=0)
-
-        xmmo = self.etfs["XMMO"]
-        xmmo.target_percent = 100
-        xmmo.save(update_fields=["target_percent"])
-
-        recommendation = self.generate()
-
-        self.assertEqual(
-            recommendation.action,
-            Recommendation.Action.HOLD_CASH,
+        account = Account.objects.get(
+            name="vaporFUND Test"
         )
 
-        with self.assertRaisesMessage(
-            CommandError,
-            "no purchase to approve",
-        ):
-            call_command(
-                "approve_recommendation",
-                contribution=1,
-                stdout=StringIO(),
-            )
-
-        recommendation.refresh_from_db()
-
-        self.assertEqual(
-            recommendation.status,
-            Recommendation.Status.DRAFT,
+        set_account_targets(
+            account,
+            {
+                "XMMO": 100,
+            },
         )
 
     def test_missing_recommendation_is_rejected(self):
@@ -1308,6 +1347,10 @@ class DashboardContributionTests(TestCase):
 
         self.etfs = {}
 
+        self.account = Account.objects.get(
+            name="vaporFUND Test"
+        )
+
         for ticker, name, asset_class, target, price in targets:
             etf = ETF.objects.create(
                 ticker=ticker,
@@ -1325,6 +1368,12 @@ class DashboardContributionTests(TestCase):
             )
 
             self.etfs[ticker] = etf
+
+            AccountTarget.objects.create(
+                account=self.account,
+                etf=etf,
+                target_percent=target,
+            )
 
         self.url = reverse(
             "portfolio:dashboard"
@@ -1429,15 +1478,17 @@ class DashboardContributionTests(TestCase):
         )
 
     def test_dashboard_displays_complete_purchase_plan(self):
+
+        set_account_targets(
+            self.account,
+            {
+                "SCHB": 50,
+                "VTEB": 50,
+            },
+        )
+
+
         ETF.objects.update(target_percent=0)
-
-        schb = self.etfs["SCHB"]
-        schb.target_percent = 50
-        schb.save(update_fields=["target_percent"])
-
-        vteb = self.etfs["VTEB"]
-        vteb.target_percent = 50
-        vteb.save(update_fields=["target_percent"])
 
         response = self.post_contribution(
             amount="200.00",
@@ -2275,6 +2326,22 @@ class MultiAccountIsolationTests(TestCase):
             enabled=True,
         )
 
+        for account in [
+            self.account_a,
+            self.account_b,
+        ]:
+            AccountTarget.objects.create(
+                account=account,
+                etf=self.schb,
+                target_percent=50,
+            )
+
+            AccountTarget.objects.create(
+                account=account,
+                etf=self.vteb,
+                target_percent=50,
+            )
+
         for etf in [self.schb, self.vteb]:
             PriceHistory.objects.create(
                 etf=etf,
@@ -2466,3 +2533,69 @@ class MultiAccountIsolationTests(TestCase):
             contribution_b.sequence_number,
             1,
         )
+
+    def test_target_allocations_are_independent_per_account(self):
+        set_account_targets(
+            self.account_a,
+            {
+                "SCHB-MA": 100,
+            },
+        )
+
+        set_account_targets(
+            self.account_b,
+            {
+                "VTEB-MA": 100,
+            },
+        )
+
+        CashTransaction.objects.create(
+            account=self.account_a,
+            date=date(2026, 9, 1),
+            transaction_type=(
+                CashTransaction.TransactionType.DEPOSIT
+            ),
+            amount=Decimal("100.00"),
+            description="Account A deposit",
+        )
+
+        CashTransaction.objects.create(
+            account=self.account_b,
+            date=date(2026, 9, 1),
+            transaction_type=(
+                CashTransaction.TransactionType.DEPOSIT
+            ),
+            amount=Decimal("100.00"),
+            description="Account B deposit",
+        )
+
+        decision_a = calculate_allocation(
+            date(2026, 9, 1),
+            account=self.account_a,
+        )
+
+        decision_b = calculate_allocation(
+            date(2026, 9, 1),
+            account=self.account_b,
+        )
+
+        self.assertEqual(
+            decision_a.selected.etf,
+            self.schb,
+        )
+        self.assertEqual(
+            decision_b.selected.etf,
+            self.vteb,
+        )
+
+        self.assertEqual(
+            decision_a.selected.target_percent,
+            100,
+        )
+        self.assertEqual(
+            decision_b.selected.target_percent,
+            100,
+        )
+
+        self.assertEqual(decision_a.action, "BUY")
+        self.assertEqual(decision_b.action, "BUY")

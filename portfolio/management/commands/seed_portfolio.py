@@ -1,8 +1,9 @@
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from portfolio.models import ETF
+from portfolio.models import Account, AccountTarget, ETF
 
+DEFAULT_ACCOUNT_NAME = "vaporFUND Test"
 
 class Command(BaseCommand):
     help = "Create or update the vaporFUND target allocation"
@@ -58,10 +59,27 @@ class Command(BaseCommand):
                 f"Configured targets total {total_target}%, not 100%."
             )
 
+        account, _ = Account.objects.get_or_create(
+            name=DEFAULT_ACCOUNT_NAME,
+            defaults={
+                "description": (
+                    "Original vaporFUND account migrated "
+                    "from the single-account system."
+                 ),
+                "is_active": True,
+            },
+        )
+
         configured_tickers = {
             item["ticker"]
             for item in self.TARGETS
         }
+
+        AccountTarget.objects.filter(
+            account=account,
+        ).exclude(
+            etf__ticker__in=configured_tickers,
+        ).delete()
 
         ETF.objects.exclude(
             ticker__in=configured_tickers
@@ -81,31 +99,41 @@ class Command(BaseCommand):
                 },
             )
 
+            account_target, _ = AccountTarget.objects.update_or_create(
+                account=account,
+                etf=etf,
+                defaults={
+                    "target_percent": item["target_percent"],
+                },
+            )
+
             verb = "Created" if created else "Updated"
 
             self.stdout.write(
                 f"{verb}: {etf.ticker} "
-                f"{etf.target_percent}% "
+                f"{account_target.target_percent}% "
                 f"{etf.get_asset_class_display()}"
             )
 
-        database_total = sum(
-            ETF.objects.filter(
-                enabled=True
-            ).values_list(
-                "target_percent",
-                flat=True,
+            database_total = sum(
+                AccountTarget.objects.filter(
+                    account=account,
+                    target_percent__gt=0,
+                    etf__enabled=True,
+                ).values_list(
+                    "target_percent",
+                    flat=True,
+                )
             )
-        )
 
         if database_total != 100:
             raise CommandError(
-                f"Enabled database targets total "
+                f"Account targets for {account.name} Enabled database target total "
                 f"{database_total}%, not 100%."
             )
 
         self.stdout.write(
             self.style.SUCCESS(
-                "vaporFUND target allocation configured: 100%"
+                "{account_name} target allocation configured: 100%"
             )
         )

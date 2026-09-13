@@ -6,6 +6,7 @@ from django.db.models import Sum
 
 from .models import (
     Account,
+    AccountTarget,
     CashTransaction,
     ETF,
     HoldingLot,
@@ -105,26 +106,30 @@ def latest_price(etf, as_of_date):
 def calculate_allocation(as_of_date, account=None):
     account = resolve_account(account)
 
-    target_etfs = list(
-        ETF.objects.filter(
-            enabled=True,
+    account_targets = list(
+        AccountTarget.objects.filter(
+            account=account,
             target_percent__gt=0,
-        ).order_by("ticker")
+            etf__enabled=True,
+        )
+        .select_related("etf")
+        .order_by("etf__ticker")
     )
 
-    if not target_etfs:
+    if not account_targets:
         raise AllocationError(
-            "No enabled target ETFs are configured."
+            f"No target allocation is configured "
+            f"for account {account.name}."
         )
 
     total_target = sum(
-        etf.target_percent
-        for etf in target_etfs
+        target.target_percent
+        for target in account_targets
     )
 
     if total_target != 100:
         raise AllocationError(
-            f"Enabled ETF targets total "
+            f"Account targets for {account.name} total "
             f"{total_target}%, not 100%."
         )
 
@@ -191,7 +196,9 @@ def calculate_allocation(as_of_date, account=None):
 
     rows = []
 
-    for etf in target_etfs:
+    for target in account_targets:
+        etf = target.etf
+
         price = latest_price(etf, as_of_date)
 
         current_shares = shares_by_etf.get(
@@ -206,7 +213,7 @@ def calculate_allocation(as_of_date, account=None):
 
         target_value = (
             portfolio_value
-            * Decimal(etf.target_percent)
+            * Decimal(target.target_percent)
             / Decimal("100")
         ).quantize(MONEY)
 
@@ -227,7 +234,7 @@ def calculate_allocation(as_of_date, account=None):
                 reference_price=price.close,
                 price_date=price.date,
                 current_value=current_value,
-                target_percent=etf.target_percent,
+                target_percent=target.target_percent,
                 actual_percent=actual_percent,
                 target_value=target_value,
                 shortfall=shortfall,
