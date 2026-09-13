@@ -1,6 +1,7 @@
 .venv/
 .env
 db.sqlite3
+db.sqlite3*.bak
 staticfiles/
 __pycache__/
 *.py[cod]
