@@ -110,14 +110,22 @@ class Contribution(models.Model):
         decimal_places=2,
         default=100,
     )
-    sequence_number = models.PositiveIntegerField(
-        unique=True,
-    )
+    sequence_number = models.PositiveIntegerField()
     processed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["date"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["account", "date"],
+                name="unique_contribution_date_per_account",
+            ),
+            models.UniqueConstraint(
+                fields=["account", "sequence_number"],
+                name="unique_contribution_sequence_per_account",
+            ),
+        ]
 
     def __str__(self):
         return (
