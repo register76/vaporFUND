@@ -37,8 +37,8 @@ class Command(BaseCommand):
 
         etfs = ETF.objects.filter(
             enabled=True,
-            target_percent__gt=0,
-        )
+            account_targets__target_percent__gt=0,
+        ).distinct()
 
         if requested_tickers:
             normalized_tickers = {

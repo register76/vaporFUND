@@ -1,6 +1,8 @@
 from django.contrib import admin
 
 from .models import (
+    Account,
+    AccountTarget,
     CashTransaction,
     Contribution,
     ETF,
@@ -11,13 +13,43 @@ from .models import (
 )
 
 
+@admin.register(Account)
+class AccountAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "is_active",
+        "created_at",
+    )
+    list_filter = ("is_active",)
+    search_fields = ("name",)
+    ordering = ("name",)
+
+
+@admin.register(AccountTarget)
+class AccountTargetAdmin(admin.ModelAdmin):
+    list_display = (
+        "account",
+        "etf",
+        "target_percent",
+    )
+    list_filter = ("account",)
+    search_fields = (
+        "account__name",
+        "etf__ticker",
+        "etf__name",
+    )
+    ordering = (
+        "account__name",
+        "etf__ticker",
+    )
+
+
 @admin.register(ETF)
 class ETFAdmin(admin.ModelAdmin):
     list_display = (
         "ticker",
         "name",
         "asset_class",
-        "target_percent",
         "enabled",
         "expense_ratio",
     )

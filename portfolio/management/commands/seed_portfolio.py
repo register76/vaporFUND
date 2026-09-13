@@ -81,20 +81,13 @@ class Command(BaseCommand):
             etf__ticker__in=configured_tickers,
         ).delete()
 
-        ETF.objects.exclude(
-            ticker__in=configured_tickers
-        ).update(
-            enabled=False,
-            target_percent=0,
-        )
-
         for item in self.TARGETS:
             etf, created = ETF.objects.update_or_create(
                 ticker=item["ticker"],
                 defaults={
                     "name": item["name"],
                     "asset_class": item["asset_class"],
-                    "target_percent": item["target_percent"],
+                    "target_percent": 0,
                     "enabled": True,
                 },
             )

@@ -63,11 +63,18 @@ class PortfolioConfigurationTests(TestCase):
     def test_seed_creates_expected_allocation(self):
         self.run_seed()
 
+
+        account = Account.objects.get(
+            name="vaporFUND Test"
+        )
+
         targets = dict(
-            ETF.objects.filter(
-                enabled=True
+            AccountTarget.objects.filter(
+                account=account,
+                target_percent__gt=0,
+                etf__enabled=True,
             ).values_list(
-                "ticker",
+                "etf__ticker",
                 "target_percent",
             )
         )
@@ -95,10 +102,16 @@ class PortfolioConfigurationTests(TestCase):
     def test_stock_and_bond_targets_are_75_25(self):
         self.run_seed()
 
+        account = Account.objects.get(
+            name="vaporFUND Test"
+        )
+
         stock_target = sum(
-            ETF.objects.filter(
-                enabled=True,
-                asset_class=ETF.AssetClass.STOCK,
+            AccountTarget.objects.filter(
+                account=account,
+                target_percent__gt=0,
+                etf__enabled=True,
+                etf__asset_class=ETF.AssetClass.STOCK,
             ).values_list(
                 "target_percent",
                 flat=True,
@@ -106,9 +119,11 @@ class PortfolioConfigurationTests(TestCase):
         )
 
         bond_target = sum(
-            ETF.objects.filter(
-                enabled=True,
-                asset_class=ETF.AssetClass.BOND,
+            AccountTarget.objects.filter(
+                account=account,
+                target_percent__gt=0,
+                etf__enabled=True,
+                etf__asset_class=ETF.AssetClass.BOND,
             ).values_list(
                 "target_percent",
                 flat=True,
