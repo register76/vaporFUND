@@ -437,8 +437,6 @@ class AllocationServiceTests(TestCase):
         )
 
     def test_purchase_plan_recalculates_after_each_buy(self):
-        ETF.objects.update(target_percent=0)
-
         schb = self.etfs["SCHB"]
         vteb = self.etfs["VTEB"]
 
@@ -777,18 +775,8 @@ class RecommendationCommandTests(TestCase):
             },
         )
 
-        ETF.objects.update(target_percent=0)
-
         schb = self.etfs["SCHB"]
-        schb.target_percent = 50
-        schb.save(update_fields=["target_percent"])
-
         vteb = self.etfs["VTEB"]
-        vteb.target_percent = 50
-        vteb.save(update_fields=["target_percent"])
-
-
-
 
         self.contribution.amount = Decimal("200.00")
         self.contribution.save(update_fields=["amount"])
@@ -1371,7 +1359,6 @@ class DashboardContributionTests(TestCase):
                 ticker=ticker,
                 name=name,
                 asset_class=asset_class,
-                target_percent=target,
                 enabled=True,
             )
 
@@ -1501,9 +1488,6 @@ class DashboardContributionTests(TestCase):
                 "VTEB": 50,
             },
         )
-
-
-        ETF.objects.update(target_percent=0)
 
         response = self.post_contribution(
             amount="200.00",
@@ -2330,14 +2314,12 @@ class MultiAccountIsolationTests(TestCase):
             ticker="SCHB-MA",
             name="SCHB Multi-Account Test",
             asset_class=ETF.AssetClass.STOCK,
-            target_percent=50,
             enabled=True,
         )
         self.vteb = ETF.objects.create(
             ticker="VTEB-MA",
             name="VTEB Multi-Account Test",
             asset_class=ETF.AssetClass.BOND,
-            target_percent=50,
             enabled=True,
         )
 

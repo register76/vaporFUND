@@ -87,7 +87,6 @@ class Command(BaseCommand):
                 defaults={
                     "name": item["name"],
                     "asset_class": item["asset_class"],
-                    "target_percent": 0,
                     "enabled": True,
                 },
             )

@@ -73,13 +73,6 @@ class ETF(models.Model):
         max_length=10,
         choices=AssetClass.choices,
     )
-    target_percent = models.PositiveSmallIntegerField(
-        validators=[
-            MinValueValidator(0),
-            MaxValueValidator(100),
-        ],
-        help_text="Target percentage of the vaporFUND portfolio.",
-    )
     enabled = models.BooleanField(default=True)
     expense_ratio = models.DecimalField(
         max_digits=6,
