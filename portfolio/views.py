@@ -24,6 +24,7 @@ from .forms import (
 )
 
 from .models import (
+    Account,
     AccountTarget,
     CashTransaction,
     Contribution,
@@ -46,7 +47,23 @@ from .workflows import (
 )
 
 def dashboard(request):
-    account = resolve_account()
+
+    active_accounts = get_list_or_404(
+        Account.objects.order_by("name"),
+        is_active=True,
+    )
+
+    selected_account_id = request.GET.get("account")
+
+    if selected_account_id:
+        account = get_object_or_404(
+            Account,
+            pk=selected_account_id,
+            is_active=True,
+        )
+    else:
+        account = active_accounts[0]
+
     if request.method == "POST":
         contribution_form = ContributionForm(
             request.POST
@@ -122,7 +139,9 @@ def dashboard(request):
                     result,
                 )
 
-                return redirect(request.path)
+                return redirect(
+                    f"{request.path}?account={account.pk}"
+                )
 
     else:
         contribution_form = ContributionForm()
@@ -329,7 +348,7 @@ def dashboard(request):
         .order_by("-sequence_number")[:10]
     )
 
-    configured_targets = (
+    configured_targets = list(
         AccountTarget.objects.filter(
             account=account,
             target_percent__gt=0,
@@ -337,6 +356,18 @@ def dashboard(request):
         )
         .select_related("etf")
         .order_by("etf__ticker")
+    )
+
+    stock_target_percent = sum(
+        target.target_percent
+        for target in configured_targets
+        if target.etf.asset_class == ETF.AssetClass.STOCK
+    )
+
+    bond_target_percent = sum(
+        target.target_percent
+        for target in configured_targets
+        if target.etf.asset_class == ETF.AssetClass.BOND
     )
 
     context = {
@@ -348,6 +379,8 @@ def dashboard(request):
         "bond_value": bond_value,
         "stock_percent": stock_percent,
         "bond_percent": bond_percent,
+        "stock_target_percent": stock_target_percent,
+        "bond_target_percent": bond_target_percent,
         "cash_percent": cash_percent,
         "decision": decision,
         "allocation_rows": allocation_rows,
@@ -364,6 +397,8 @@ def dashboard(request):
         "holdings": holdings,
         "configured_targets": configured_targets,
         "contribution_form": contribution_form,
+        "account": account,
+        "active_accounts": active_accounts,
     }
 
     return render(

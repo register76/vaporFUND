@@ -842,3 +842,74 @@ tbody tr:last-child td {
         width: 100%;
     }
 }
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.account-selector {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.account-selector label {
+    color: #8fa99e;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.account-selector select {
+    appearance: none;
+    min-width: 180px;
+    padding: 0.55rem 2.2rem 0.55rem 0.8rem;
+
+    color: #f3f7f5;
+    background-color: #111d18;
+
+    border: 1px solid #29483c;
+    border-radius: 6px;
+
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+
+    cursor: pointer;
+
+    background-image:
+        linear-gradient(45deg, transparent 50%, #51dfa7 50%),
+        linear-gradient(135deg, #51dfa7 50%, transparent 50%);
+    background-position:
+        calc(100% - 15px) 50%,
+        calc(100% - 10px) 50%;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+}
+
+.account-selector select:hover {
+    border-color: #51dfa7;
+}
+
+.account-selector select:focus {
+    outline: none;
+    border-color: #51dfa7;
+    box-shadow: 0 0 0 2px rgba(81, 223, 167, 0.15);
+}
+
+@media (max-width: 700px) {
+    .header-actions {
+        align-items: flex-end;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+
+    .account-selector {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 0.35rem;
+    }
+}

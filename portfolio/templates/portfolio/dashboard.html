@@ -10,7 +10,7 @@
     <title>vaporFUND</title>
     <link
         rel="stylesheet"
-        href="{% static 'portfolio/dashboard.css' %}"
+        href="{% static 'portfolio/dashboard.css' %}?v=2"
     >
 </head>
 <body>
@@ -23,9 +23,32 @@
             </p>
         </div>
 
-        <a class="admin-link" href="/admin/">
-            Django Admin
-        </a>
+        <div class="header-actions">
+            <form method="get" class="account-selector">
+                <label for="account">Account</label>
+
+                <select
+                    id="account"
+                    name="account"
+                    onchange="this.form.submit()"
+                >
+                    {% for item in active_accounts %}
+                        <option
+                            value="{{ item.pk }}"
+                            {% if item.pk == account.pk %}
+                                selected
+                            {% endif %}
+                        >
+                            {{ item.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </form>
+
+            <a class="admin-link" href="/admin/">
+                Django Admin
+            </a>
+        </div>
     </header>
 
 {% if messages %}
@@ -66,7 +89,9 @@
 
             <article class="summary-card">
                 <p class="label">Allocation policy</p>
-                <p class="metric">75/25</p>
+                <p class="metric">
+                    {{ stock_target_percent }}/{{ bond_target_percent }}
+                </p>
                 <p class="detail">
                     Stocks / municipal bonds
                 </p>
@@ -307,7 +332,7 @@
                     <strong>
                         {{ stock_percent|floatformat:1 }}%
                     </strong>
-                    <small>75% target</small>
+                    <small>{{ stock_target_percent }}% target</small>
                 </div>
 
                 <div>
@@ -315,7 +340,7 @@
                     <strong>
                         {{ bond_percent|floatformat:1 }}%
                     </strong>
-                    <small>25% target</small>
+                    <small>{{ bond_target_percent }}% target</small>
                 </div>
 
                 <div>
