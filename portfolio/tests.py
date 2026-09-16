@@ -1665,11 +1665,13 @@ class DashboardContributionTests(TestCase):
         self.post_contribution()
 
         recommendation = Recommendation.objects.get()
+        contribution = recommendation.contribution
 
         url = reverse(
             "portfolio:recommendation_review",
             args=[
-                recommendation.contribution.sequence_number
+                contribution.account_id,
+                contribution.sequence_number,
             ],
         )
 
@@ -1721,7 +1723,10 @@ class DashboardContributionTests(TestCase):
 
         review_url = reverse(
             "portfolio:recommendation_review",
-            args=[sequence_number],
+            args=[
+                recommendation.contribution.account_id,
+                sequence_number,
+            ],
         )
 
         response = self.client.get(review_url)
@@ -1747,10 +1752,69 @@ class DashboardContributionTests(TestCase):
             review_url,
         )
 
+    def test_review_page_is_scoped_to_account(self):
+        self.post_contribution()
+
+        first_recommendation = Recommendation.objects.get()
+        first_contribution = first_recommendation.contribution
+
+        second_account = Account.objects.create(
+            name="Second Test Account",
+        )
+
+        second_contribution = Contribution.objects.create(
+            account=second_account,
+            date=date(2026, 9, 1),
+            amount=Decimal("100.00"),
+            sequence_number=first_contribution.sequence_number,
+        )
+
+        first_recommendation.pk = None
+        first_recommendation.contribution = second_contribution
+        first_recommendation.reason = "SECOND ACCOUNT ONLY"
+        first_recommendation.save()
+
+        first_account_url = reverse(
+            "portfolio:recommendation_review",
+            args=[
+                self.account.pk,
+                first_contribution.sequence_number,
+            ],
+        )
+
+        second_account_url = reverse(
+            "portfolio:recommendation_review",
+            args=[
+                second_account.pk,
+                second_contribution.sequence_number,
+            ],
+        )
+
+        first_response = self.client.get(first_account_url)
+        second_response = self.client.get(second_account_url)
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+
+        self.assertNotContains(
+            first_response,
+            "SECOND ACCOUNT ONLY",
+        )
+
+        self.assertContains(
+            second_response,
+            "SECOND ACCOUNT ONLY",
+        )
+
     def test_review_page_returns_404_for_unknown_contribution(self):
+        account = Account.objects.get()
+
         url = reverse(
             "portfolio:recommendation_review",
-            args=[999],
+            args=[
+                account.pk,
+                999,
+            ],
         )
 
         response = self.client.get(url)
@@ -1761,11 +1825,13 @@ class DashboardContributionTests(TestCase):
         self.post_contribution()
 
         recommendation = Recommendation.objects.get()
-
+        contribution = recommendation.contribution
+        
         url = reverse(
             "portfolio:recommendation_review",
             args=[
-                recommendation.contribution.sequence_number
+                contribution.account_id,
+                contribution.sequence_number,
             ],
         )
 
@@ -1797,13 +1863,22 @@ class DashboardContributionTests(TestCase):
         recommendation.plan_order = 2
         recommendation.save()
 
+        account_id = recommendation.contribution.account_id
+
         approval_url = reverse(
             "portfolio:recommendation_approve",
-            args=[sequence_number],
+            args=[
+                account_id,
+                sequence_number,
+            ],
         )
+
         review_url = reverse(
             "portfolio:recommendation_review",
-            args=[sequence_number],
+            args=[
+                account_id,
+                sequence_number,
+            ],
         )
 
         transaction_count = (
@@ -1848,13 +1923,17 @@ class DashboardContributionTests(TestCase):
         execute_url = reverse(
             "portfolio:recommendation_execute",
             args=[
+                contribution.account_id,
                 contribution.sequence_number,
                 recommendation.plan_order,
             ],
         )
         review_url = reverse(
             "portfolio:recommendation_review",
-            args=[contribution.sequence_number],
+            args=[
+                contribution.account_id,
+                contribution.sequence_number,
+            ]
         )
 
         transaction_count = (
@@ -1917,6 +1996,7 @@ class DashboardContributionTests(TestCase):
         execute_url = reverse(
             "portfolio:recommendation_execute",
             args=[
+                recommendation.contribution.account_id,
                 recommendation.contribution.sequence_number,
                 recommendation.plan_order,
             ],
@@ -1976,11 +2056,16 @@ class DashboardContributionTests(TestCase):
 
         review_url = reverse(
             "portfolio:recommendation_review",
-            args=[contribution.sequence_number],
+            args=[
+                contribution.account_id,
+                contribution.sequence_number,
+            ],
         )
+
         execute_url = reverse(
             "portfolio:recommendation_execute",
             args=[
+                contribution.account_id,
                 contribution.sequence_number,
                 recommendation.plan_order,
             ],
@@ -2018,6 +2103,7 @@ class DashboardContributionTests(TestCase):
         execute_url = reverse(
             "portfolio:recommendation_execute",
             args=[
+                recommendation.contribution.account_id,
                 recommendation.contribution.sequence_number,
                 recommendation.plan_order,
             ],
@@ -2067,6 +2153,7 @@ class DashboardContributionTests(TestCase):
         execute_url = reverse(
             "portfolio:recommendation_execute",
             args=[
+                recommendation.contribution.account_id,
                 recommendation.contribution.sequence_number,
                 recommendation.plan_order,
             ],
@@ -2116,6 +2203,7 @@ class DashboardContributionTests(TestCase):
         execute_url = reverse(
             "portfolio:recommendation_execute",
             args=[
+                recommendation.contribution.account_id,
                 recommendation.contribution.sequence_number,
                 recommendation.plan_order,
             ],
@@ -2180,11 +2268,19 @@ class DashboardContributionTests(TestCase):
         urls = [
             reverse(
                 "portfolio:recommendation_execute",
-                args=[999, 1],
+                args=[
+                    recommendation.contribution.account_id,
+                    999,
+                    1,
+                ],
             ),
             reverse(
                 "portfolio:recommendation_execute",
-                args=[sequence_number, 999],
+                args=[
+                    recommendation.contribution.account_id,
+                    sequence_number,
+                    999,
+                ],
             ),
         ]
 
@@ -2230,6 +2326,7 @@ class DashboardContributionTests(TestCase):
         first_execute_url = reverse(
             "portfolio:recommendation_execute",
             args=[
+                contribution.account_id,
                 contribution.sequence_number,
                 first_recommendation.plan_order,
             ],
@@ -2237,6 +2334,7 @@ class DashboardContributionTests(TestCase):
         second_execute_url = reverse(
             "portfolio:recommendation_execute",
             args=[
+                contribution.account_id,
                 contribution.sequence_number,
                 second_recommendation.plan_order,
             ],

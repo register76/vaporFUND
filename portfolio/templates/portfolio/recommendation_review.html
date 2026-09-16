@@ -30,7 +30,7 @@
 
         <a
             class="admin-link"
-            href="{% url 'portfolio:dashboard' %}"
+            href="{% url 'portfolio:dashboard' %}?account={{ contribution.account_id }}"
         >
             Back to dashboard
         </a>
@@ -199,7 +199,7 @@
                                 {% if recommendation.status == "DRAFT" or recommendation.status == "COMPLIANCE_APPROVED" %}
                                     <a
                                         class="review-link"
-                                        href="{% url 'portfolio:recommendation_execute' contribution.sequence_number recommendation.plan_order %}"
+                                        href="{% url 'portfolio:recommendation_execute' contribution.account_id contribution.sequence_number recommendation.plan_order %}"
                                     >
                                         Record purchase
                                     </a>

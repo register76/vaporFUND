@@ -593,6 +593,7 @@ def holding_detail(
 @require_GET
 def recommendation_review(
     request,
+    account_id,
     sequence_number,
 ):
     recommendations = get_list_or_404(
@@ -602,6 +603,7 @@ def recommendation_review(
             "etf",
         )
         .order_by("plan_order"),
+        contribution__account_id=account_id,
         contribution__sequence_number=sequence_number,
     )
 
@@ -657,6 +659,7 @@ def recommendation_review(
 @require_http_methods(["GET", "POST"])
 def recommendation_execute(
     request,
+    account_id,
     sequence_number,
     plan_order,
 ):
@@ -665,6 +668,7 @@ def recommendation_execute(
             "contribution",
             "etf",
         ),
+        contribution__account_id=account_id,
         contribution__sequence_number=sequence_number,
         plan_order=plan_order,
     )
@@ -728,6 +732,7 @@ def recommendation_execute(
 
                 return redirect(
                     "portfolio:recommendation_review",
+                    account_id=account_id,
                     sequence_number=sequence_number,
                 )
     else:
@@ -750,10 +755,12 @@ def recommendation_execute(
 @require_http_methods(["GET", "POST"])
 def recommendation_approve(
     request,
+    account_id,
     sequence_number,
 ):
     get_list_or_404(
         Recommendation,
+        contribution__account_id=account_id,
         contribution__sequence_number=sequence_number,
     )
 
@@ -767,5 +774,6 @@ def recommendation_approve(
 
     return redirect(
         "portfolio:recommendation_review",
+        account_id=account_id,
         sequence_number=sequence_number,
     )

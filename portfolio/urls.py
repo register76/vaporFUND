@@ -17,12 +17,19 @@ urlpatterns = [
         name="holding_detail",
     ),
     path(
-        "recommendations/<int:sequence_number>/",
+        (
+            "accounts/"
+            "<int:account_id>/"
+            "recommendations/"
+            "<int:sequence_number>/"
+        ),
         views.recommendation_review,
         name="recommendation_review",
     ),
     path(
         (
+            "accounts/"
+            "<int:account_id>/"
             "recommendations/"
             "<int:sequence_number>/"
             "<int:plan_order>/execute/"
@@ -31,7 +38,12 @@ urlpatterns = [
         name="recommendation_execute",
     ),
     path(
-        "recommendations/<int:sequence_number>/approve/",
+        (
+            "accounts/"
+            "<int:account_id>/"
+            "recommendations/"
+            "<int:sequence_number>/approve/"
+        ),
         views.recommendation_approve,
         name="recommendation_approve",
     ),

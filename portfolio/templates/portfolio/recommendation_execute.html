@@ -30,7 +30,7 @@
 
         <a
             class="admin-link"
-            href="{% url 'portfolio:recommendation_review' contribution.sequence_number %}"
+            href="{% url 'portfolio:recommendation_review' contribution.account_id contribution.sequence_number %}"
         >
             Back to purchase plan
         </a>
@@ -183,7 +183,7 @@
 
             <a
                 class="review-link"
-                href="{% url 'portfolio:recommendation_review' contribution.sequence_number %}"
+                href="{% url 'portfolio:recommendation_review' contribution.account_id contribution.sequence_number %}"
             >
                 Cancel and return to purchase plan
             </a>
