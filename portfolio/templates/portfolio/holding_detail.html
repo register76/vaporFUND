@@ -1,0 +1,222 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+    <title>{{ etf.ticker }} · vaporFUND</title>
+
+    <link
+        rel="stylesheet"
+        href="{% static 'portfolio/dashboard.css' %}?v=2"
+    >
+</head>
+<body>
+    <header class="site-header">
+        <div>
+            <p class="eyebrow">VAPORWARE LABS</p>
+            <h1>vapor<span>FUND</span></h1>
+            <p class="subtitle">
+                {{ account.name }}
+            </p>
+        </div>
+
+        <div class="header-actions">
+            <form method="get" class="account-selector">
+                <label for="account">Account</label>
+
+                <select
+                    id="account"
+                    name="account"
+                    onchange="this.form.submit()"
+                >
+                    {% for item in active_accounts %}
+                        <option
+                            value="{{ item.pk }}"
+                            {% if item.pk == account.pk %}
+                                selected
+                            {% endif %}
+                        >
+                            {{ item.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </form>
+
+            <a
+                class="admin-link"
+                href="{% url 'portfolio:dashboard' %}?account={{ account.pk }}"
+            >
+                Back to dashboard
+            </a>
+        </div>
+    </header>
+
+    <main>
+        <section class="panel">
+            <div class="panel-heading">
+                <div>
+                    <p class="eyebrow">HOLDING DETAIL</p>
+                    <h2>{{ etf.ticker }}</h2>
+                    <p class="panel-note">
+                        {{ etf.name }}
+                    </p>
+                </div>
+
+                <span class="period">
+                    As of {{ as_of_date }}
+                </span>
+            </div>
+
+            <div class="recommendation-details">
+                <div class="detail-box">
+                    <span>Current value</span>
+                    <strong>
+                        ${{ current_value|floatformat:2 }}
+                    </strong>
+                </div>
+
+                <div class="detail-box">
+                    <span>Shares</span>
+                    <strong>
+                        {{ total_shares }}
+                    </strong>
+                </div>
+
+                <div class="detail-box">
+                    <span>Current allocation</span>
+                    <strong>
+                        {{ current_allocation|floatformat:2 }}%
+                    </strong>
+                </div>
+
+                <div class="detail-box">
+                    <span>Target allocation</span>
+                    <strong>
+                        {{ target_allocation|floatformat:0 }}%
+                    </strong>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-heading">
+                <div>
+                    <p class="eyebrow">POSITION</p>
+                    <h2>Holding metrics</h2>
+                </div>
+            </div>
+
+            <div class="recommendation-details">
+                <div class="detail-box">
+                    <span>Current price</span>
+                    <strong>
+                        ${{ current_price|floatformat:2 }}
+                    </strong>
+
+                    {% if price_date %}
+                        <small>{{ price_date }}</small>
+                    {% endif %}
+                </div>
+
+                <div class="detail-box">
+                    <span>Average cost basis</span>
+                    <strong>
+                        ${{ average_cost_basis|floatformat:2 }}
+                    </strong>
+                </div>
+
+                <div class="detail-box">
+                    <span>Total cost basis</span>
+                    <strong>
+                        ${{ total_cost|floatformat:2 }}
+                    </strong>
+                </div>
+
+                <div class="detail-box">
+                    <span>Allocation drift</span>
+                    <strong>
+                        {{ allocation_drift|floatformat:2 }}%
+                    </strong>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-heading">
+                <div>
+                    <p class="eyebrow">ABOUT</p>
+                    <h2>About this holding</h2>
+                </div>
+            </div>
+
+            <p class="reason">
+                {{ etf.ticker }} is {{ etf.name }} and is classified
+                as a {{ etf.get_asset_class_display|lower }} holding
+                in vaporFUND.
+            </p>
+
+            <p class="reason">
+                Its target allocation in {{ account.name }} is
+                {{ target_allocation|floatformat:0 }}%.
+                The current allocation is
+                {{ current_allocation|floatformat:2 }}%.
+            </p>
+        </section>
+
+        <section class="panel">
+            <div class="panel-heading">
+                <div>
+                    <p class="eyebrow">LOTS</p>
+                    <h2>Open purchase lots</h2>
+                </div>
+            </div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Purchase date</th>
+                            <th>Shares</th>
+                            <th>Purchase price</th>
+                            <th>Cost basis</th>
+                            <th>Compliance eligible</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        {% for lot in lots %}
+                            <tr>
+                                <td>{{ lot.purchase_date }}</td>
+                                <td>{{ lot.shares_remaining }}</td>
+                                <td>
+                                    ${{ lot.price_per_share|floatformat:2 }}
+                                </td>
+                                <td>
+                                    ${{ lot.total_cost|floatformat:2 }}
+                                </td>
+                                <td>
+                                    {{ lot.compliance_eligible_date }}
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr>
+                                <td colspan="5">
+                                    No open lots for this holding.
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        Experiment. Share Results. Enjoy the Process.
+    </footer>
+</body>
+</html>

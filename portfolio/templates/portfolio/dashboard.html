@@ -10,7 +10,7 @@
     <title>vaporFUND</title>
     <link
         rel="stylesheet"
-        href="{% static 'portfolio/dashboard.css' %}?v=2"
+        href="{% static 'portfolio/dashboard.css' %}?v=3"
     >
 </head>
 <body>
@@ -19,7 +19,7 @@
             <p class="eyebrow">VAPORWARE LABS</p>
             <h1>vapor<span>FUND</span></h1>
             <p class="subtitle">
-                Buy-only portfolio allocation · $100 per week
+                Buy-only portfolio allocation
             </p>
         </div>
 
@@ -117,62 +117,110 @@
             </article>
         </section>
 
-        <section class="panel contribution-panel">
-            <div class="panel-header">
+        <section class="panel contribution-launch-panel">
+            <div class="contribution-launch">
                 <div>
-                    <p class="section-label">Weekly workflow</p>
-                    <h2>Add contribution</h2>
+                    <p class="section-label">CONTRIBUTIONS</p>
+                    <h2>Contributions</h2>
                     <p class="panel-note">
-                        Add funds to shared cash and generate a draft
-                        target-allocation purchase plan.
+                        Record new cash and generate a target-allocation
+                        purchase plan.
                     </p>
                 </div>
+
+                <button
+                    type="button"
+                    class="primary-button contribution-open-button"
+                    id="open-contribution-modal"
+                >
+                    + Add Contribution
+                </button>
             </div>
+        </section>
 
-            <form method="post" class="contribution-form">
-                {% csrf_token %}
-
-                <div class="form-field">
-                    <label for="{{ contribution_form.contribution_date.id_for_label }}">
-                        {{ contribution_form.contribution_date.label }}
-                    </label>
-
-                    {{ contribution_form.contribution_date }}
-
-                    {% for error in contribution_form.contribution_date.errors %}
-                        <p class="field-error">{{ error }}</p>
-                    {% endfor %}
-                </div>
-
-                <div class="form-field">
-                    <label for="{{ contribution_form.amount.id_for_label }}">
-                        {{ contribution_form.amount.label }}
-                    </label>
-
-                    <div class="money-input">
-                        <span>$</span>
-                        {{ contribution_form.amount }}
+        <dialog
+            class="contribution-dialog"
+            id="contribution-dialog"
+            aria-labelledby="contribution-dialog-title"
+        >
+            <div class="contribution-dialog-content">
+                <div class="contribution-dialog-header">
+                    <div>
+                        <p class="section-label">NEW CONTRIBUTION</p>
+                        <h2 id="contribution-dialog-title">
+                            Add contribution
+                        </h2>
+                        <p class="panel-note">
+                            Add cash to {{ account.name }} and generate
+                            a draft purchase plan.
+                        </p>
                     </div>
 
-                    {% for error in contribution_form.amount.errors %}
-                        <p class="field-error">{{ error }}</p>
-                    {% endfor %}
+                    <button
+                        type="button"
+                        class="dialog-close"
+                        id="close-contribution-modal"
+                        aria-label="Close"
+                    >
+                        &times;
+                    </button>
                 </div>
 
-                {% for error in contribution_form.non_field_errors %}
-                    <p class="field-error">{{ error }}</p>
-                {% endfor %}
+                <form method="post" class="contribution-modal-form">
+                    {% csrf_token %}
 
-                <button type="submit" class="primary-button">
-                    Add contribution &amp; generate purchase plan
-                </button>
-            </form>
+                    <div class="form-field">
+                        <label for="{{ contribution_form.contribution_date.id_for_label }}">
+                            {{ contribution_form.contribution_date.label }}
+                        </label>
 
-            <p class="form-safety-note">
-                This creates a draft purchase plan only. It does not place
-                a brokerage order.
-            </p>
-        </section>
+                        {{ contribution_form.contribution_date }}
+
+                        {% for error in contribution_form.contribution_date.errors %}
+                            <p class="field-error">{{ error }}</p>
+                        {% endfor %}
+                    </div>
+
+                    <div class="form-field">
+                        <label for="{{ contribution_form.amount.id_for_label }}">
+                            {{ contribution_form.amount.label }}
+                        </label>
+
+                        <div class="money-input">
+                            <span>$</span>
+                            {{ contribution_form.amount }}
+                        </div>
+
+                        {% for error in contribution_form.amount.errors %}
+                            <p class="field-error">{{ error }}</p>
+                        {% endfor %}
+                    </div>
+
+                    {% for error in contribution_form.non_field_errors %}
+                        <p class="field-error">{{ error }}</p>
+                    {% endfor %}
+
+                    <p class="form-safety-note">
+                        This creates a draft purchase plan only.
+                        It does not place a brokerage order.
+                    </p>
+
+                    <div class="contribution-dialog-actions">
+                        <button
+                            type="button"
+                            class="secondary-button"
+                            id="cancel-contribution-modal"
+                        >
+                            Cancel
+                        </button>
+
+                        <button type="submit" class="primary-button">
+                            Add contribution &amp; generate plan
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </dialog>
 
         <section class="panel recommendation-panel">
             <div class="panel-heading">
@@ -529,11 +577,25 @@
                         <tbody>
                             {% for holding in holdings %}
                                 <tr>
+
+
+                                    <td>
+                                        <strong>
+                                            <a
+                                                href="{% url 'portfolio:holding_detail' holding.ticker %}?account={{ account.pk }}"
+                                                class="holding-link"
+                                            >
+                                                {{ holding.ticker }}
+                                            </a>
+                                        </strong>
+                                    </td>
                                     <td>
                                         <strong>
                                             {{ holding.ticker }}
                                         </strong>
                                     </td>
+
+
                                     <td>{{ holding.shares }}</td>
                                     <td>
                                         ${{ holding.reference_price|floatformat:2 }}
@@ -559,5 +621,55 @@
     <footer>
         Experiment. Share Results. Enjoy the Process.
     </footer>
+
+    <script>
+        const contributionDialog = document.getElementById(
+            "contribution-dialog"
+        );
+
+        const openContributionModal = document.getElementById(
+            "open-contribution-modal"
+        );
+
+        const closeContributionModal = document.getElementById(
+            "close-contribution-modal"
+        );
+
+        const cancelContributionModal = document.getElementById(
+            "cancel-contribution-modal"
+        );
+
+        openContributionModal.addEventListener("click", () => {
+            contributionDialog.showModal();
+        });
+
+        closeContributionModal.addEventListener("click", () => {
+            contributionDialog.close();
+        });
+
+        cancelContributionModal.addEventListener("click", () => {
+            contributionDialog.close();
+        });
+
+        contributionDialog.addEventListener("click", (event) => {
+            const rect = contributionDialog.getBoundingClientRect();
+
+            const clickedOutside =
+                event.clientX < rect.left ||
+                event.clientX > rect.right ||
+                event.clientY < rect.top ||
+                event.clientY > rect.bottom;
+
+            if (clickedOutside) {
+                contributionDialog.close();
+            }
+        });
+
+        {% if contribution_form.errors %}
+            contributionDialog.showModal();
+        {% endif %}
+    </script>
+
+
 </body>
 </html>

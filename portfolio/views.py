@@ -408,6 +408,189 @@ def dashboard(request):
     )
 
 @require_GET
+def holding_detail(
+    request,
+    ticker,
+):
+    active_accounts = get_list_or_404(
+        Account.objects.order_by("name"),
+        is_active=True,
+    )
+
+    selected_account_id = request.GET.get("account")
+
+    if selected_account_id:
+        account = get_object_or_404(
+            Account,
+            pk=selected_account_id,
+            is_active=True,
+        )
+    else:
+        account = active_accounts[0]
+
+    etf = get_object_or_404(
+        ETF,
+        ticker__iexact=ticker,
+    )
+
+    as_of_date = date.today()
+
+    lots = (
+        HoldingLot.objects
+        .filter(
+            execution__recommendation__contribution__account=account,
+            etf=etf,
+            shares_remaining__gt=0,
+        )
+        .select_related(
+            "execution",
+            "execution__recommendation",
+            "execution__recommendation__contribution",
+        )
+        .order_by(
+            "-purchase_date",
+            "-created_at",
+        )
+    )
+
+    holding_totals = lots.aggregate(
+        total_shares=Sum("shares_remaining"),
+        total_cost=Sum("total_cost"),
+    )
+
+    total_shares = (
+        holding_totals["total_shares"]
+        or 0
+    )
+
+    total_cost = (
+        holding_totals["total_cost"]
+        or Decimal("0.00")
+    )
+
+    if total_shares:
+        average_cost_basis = (
+            total_cost
+            / Decimal(total_shares)
+        ).quantize(
+            Decimal("0.01")
+        )
+    else:
+        average_cost_basis = Decimal("0.00")
+
+    try:
+        price = latest_price(
+            etf,
+            as_of_date,
+        )
+        current_price = price.close
+        price_date = price.date
+    except AllocationError:
+        current_price = Decimal("0.00")
+        price_date = None
+
+    current_value = (
+        current_price
+        * Decimal(total_shares)
+    ).quantize(
+        Decimal("0.01")
+    )
+
+    account_holding_totals = (
+        HoldingLot.objects
+        .filter(
+            execution__recommendation__contribution__account=account,
+            shares_remaining__gt=0,
+        )
+        .values("etf_id")
+        .annotate(
+            total_shares=Sum("shares_remaining")
+        )
+    )
+
+    total_holding_value = Decimal("0.00")
+
+    for holding in account_holding_totals:
+        holding_etf = ETF.objects.get(
+            pk=holding["etf_id"]
+        )
+
+        try:
+            holding_price = latest_price(
+                holding_etf,
+                as_of_date,
+            )
+            holding_value = (
+                holding_price.close
+                * Decimal(
+                    holding["total_shares"]
+                )
+            ).quantize(
+                Decimal("0.01")
+            )
+        except AllocationError:
+            holding_value = Decimal("0.00")
+
+        total_holding_value += holding_value
+
+    if total_holding_value > 0:
+        current_allocation = (
+            current_value
+            / total_holding_value
+            * Decimal("100")
+        ).quantize(
+            Decimal("0.01")
+        )
+    else:
+        current_allocation = Decimal("0.00")
+
+    target = (
+        AccountTarget.objects
+        .filter(
+            account=account,
+            etf=etf,
+        )
+        .first()
+    )
+
+    target_allocation = Decimal(
+        target.target_percent
+        if target
+        else 0
+    )
+
+    allocation_drift = (
+        current_allocation
+        - target_allocation
+    ).quantize(
+        Decimal("0.01")
+    )
+
+    context = {
+        "account": account,
+        "active_accounts": active_accounts,
+        "as_of_date": as_of_date,
+        "etf": etf,
+        "lots": lots,
+        "total_shares": total_shares,
+        "total_cost": total_cost,
+        "average_cost_basis": average_cost_basis,
+        "current_price": current_price,
+        "price_date": price_date,
+        "current_value": current_value,
+        "current_allocation": current_allocation,
+        "target_allocation": target_allocation,
+        "allocation_drift": allocation_drift,
+    }
+
+    return render(
+        request,
+        "portfolio/holding_detail.html",
+        context,
+    )
+
+
+@require_GET
 def recommendation_review(
     request,
     sequence_number,

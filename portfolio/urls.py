@@ -12,6 +12,11 @@ urlpatterns = [
         name="dashboard",
     ),
     path(
+        "holdings/<str:ticker>/",
+        views.holding_detail,
+        name="holding_detail",
+    ),
+    path(
         "recommendations/<int:sequence_number>/",
         views.recommendation_review,
         name="recommendation_review",

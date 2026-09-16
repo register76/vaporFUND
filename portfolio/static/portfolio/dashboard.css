@@ -913,3 +913,117 @@ tbody tr:last-child td {
         gap: 0.35rem;
     }
 }
+
+.contribution-launch-panel {
+    padding: 20px 24px;
+}
+
+.contribution-launch {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+}
+
+.contribution-launch h2 {
+    margin: 0;
+    font-size: 1.3rem;
+    letter-spacing: -0.02em;
+}
+
+.contribution-open-button {
+    flex: 0 0 auto;
+    min-width: 190px;
+}
+
+.contribution-dialog {
+    width: min(560px, calc(100% - 32px));
+    max-width: none;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--panel);
+    color: var(--text);
+    box-shadow: 0 28px 80px rgba(0, 0, 0, 0.55);
+}
+
+.contribution-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(3px);
+}
+
+.contribution-dialog-content {
+    padding: 26px;
+}
+
+.contribution-dialog-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 24px;
+}
+
+.contribution-dialog-header h2 {
+    margin: 0;
+    font-size: 1.5rem;
+    letter-spacing: -0.025em;
+}
+
+.dialog-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.dialog-close:hover {
+    border-color: var(--green);
+    color: var(--text);
+    background: rgba(75, 230, 165, 0.08);
+}
+
+.contribution-modal-form {
+    display: grid;
+    gap: 18px;
+}
+
+.contribution-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 4px;
+}
+
+@media (max-width: 650px) {
+    .contribution-launch {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .contribution-open-button {
+        width: 100%;
+    }
+
+    .contribution-dialog-content {
+        padding: 20px;
+    }
+
+    .contribution-dialog-actions {
+        flex-direction: column-reverse;
+    }
+
+    .contribution-dialog-actions button {
+        width: 100%;
+    }
+}

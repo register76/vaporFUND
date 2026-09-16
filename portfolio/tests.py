@@ -1406,7 +1406,7 @@ class DashboardContributionTests(TestCase):
         )
         self.assertContains(
             response,
-            "generate purchase plan",
+            'id="contribution-dialog"',
         )
 
     def test_post_creates_contribution_deposit_and_draft(self):
