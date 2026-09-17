@@ -577,8 +577,6 @@
                         <tbody>
                             {% for holding in holdings %}
                                 <tr>
-
-
                                     <td>
                                         <strong>
                                             <a
@@ -589,13 +587,6 @@
                                             </a>
                                         </strong>
                                     </td>
-                                    <td>
-                                        <strong>
-                                            {{ holding.ticker }}
-                                        </strong>
-                                    </td>
-
-
                                     <td>{{ holding.shares }}</td>
                                     <td>
                                         ${{ holding.reference_price|floatformat:2 }}
