@@ -52,6 +52,12 @@
             >
                 Back to dashboard
             </a>
+            <a
+                class="admin-link"
+                href="{% url 'portfolio:dashboard' %}?account={{ account.pk }}#portfolio-alignment"
+            >
+                View portfolio alignment
+            </a>
         </div>
     </header>
 
