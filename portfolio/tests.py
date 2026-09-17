@@ -2694,3 +2694,291 @@ class MultiAccountIsolationTests(TestCase):
 
         self.assertEqual(decision_a.action, "BUY")
         self.assertEqual(decision_b.action, "BUY")
+
+class AccountSettingsTests(TestCase):
+    def setUp(self):
+        call_command(
+            "seed_portfolio",
+            stdout=StringIO(),
+        )
+
+        self.account = Account.objects.get(
+            name="vaporFUND Test"
+        )
+
+        self.other_account = Account.objects.create(
+            name="Other Account"
+        )
+
+        schb = ETF.objects.get(
+            ticker="SCHB"
+        )
+
+        AccountTarget.objects.create(
+            account=self.other_account,
+            etf=schb,
+            target_percent=100,
+        )
+
+    def test_settings_page_is_scoped_to_account(self):
+        url = reverse(
+            "portfolio:account_settings",
+            kwargs={
+                "account_id": self.account.pk,
+            },
+        )
+
+        response = self.client.get(url)
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        formset = response.context[
+            "target_formset"
+        ]
+
+        account_ids = set(
+            formset.queryset.values_list(
+                "account_id",
+                flat=True,
+            )
+        )
+
+        self.assertEqual(
+            account_ids,
+            {
+                self.account.pk,
+            },
+        )
+
+    def test_valid_target_allocation_saves(self):
+        targets = list(
+            AccountTarget.objects
+            .filter(account=self.account)
+            .select_related("etf")
+            .order_by("etf__ticker")
+        )
+
+        new_targets = {
+            "AVUV": 10,
+            "SCHB": 35,
+            "VEA": 15,
+            "VTEB": 30,
+            "VWO": 5,
+            "XMMO": 5,
+        }
+
+        post_data = {
+            "form-TOTAL_FORMS": str(len(targets)),
+            "form-INITIAL_FORMS": str(len(targets)),
+            "form-MIN_NUM_FORMS": "0",
+            "form-MAX_NUM_FORMS": "1000",
+        }
+
+        for index, target in enumerate(targets):
+            post_data[
+                f"form-{index}-id"
+            ] = str(target.pk)
+
+            post_data[
+                f"form-{index}-target_percent"
+            ] = str(
+                new_targets[
+                    target.etf.ticker
+                ]
+            )
+
+        url = reverse(
+            "portfolio:account_settings",
+            kwargs={
+                "account_id": self.account.pk,
+            },
+        )
+
+        response = self.client.post(
+            url,
+            post_data,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            302,
+        )
+
+        saved_targets = dict(
+            AccountTarget.objects
+            .filter(account=self.account)
+            .values_list(
+                "etf__ticker",
+                "target_percent",
+            )
+        )
+
+        self.assertEqual(
+            saved_targets,
+            new_targets,
+        )
+
+    def test_invalid_target_total_is_rejected(self):
+        targets = list(
+            AccountTarget.objects
+            .filter(account=self.account)
+            .select_related("etf")
+            .order_by("etf__ticker")
+        )
+
+        original_targets = {
+            target.etf.ticker: target.target_percent
+            for target in targets
+        }
+
+        invalid_targets = dict(original_targets)
+
+        # Change SCHB from 40% to 39%.
+        # The resulting allocation totals 99%.
+        invalid_targets["SCHB"] = 39
+
+        post_data = {
+            "form-TOTAL_FORMS": str(len(targets)),
+            "form-INITIAL_FORMS": str(len(targets)),
+            "form-MIN_NUM_FORMS": "0",
+            "form-MAX_NUM_FORMS": "1000",
+        }
+
+        for index, target in enumerate(targets):
+            post_data[
+                f"form-{index}-id"
+            ] = str(target.pk)
+
+            post_data[
+                f"form-{index}-target_percent"
+            ] = str(
+                invalid_targets[
+                    target.etf.ticker
+                ]
+            )
+
+        url = reverse(
+            "portfolio:account_settings",
+            kwargs={
+                "account_id": self.account.pk,
+            },
+        )
+
+        response = self.client.post(
+            url,
+            post_data,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        self.assertContains(
+            response,
+            "Target allocations must total exactly 100%.",
+        )
+
+        saved_targets = dict(
+            AccountTarget.objects
+            .filter(account=self.account)
+            .values_list(
+                "etf__ticker",
+                "target_percent",
+            )
+        )
+
+        self.assertEqual(
+            saved_targets,
+            original_targets,
+        )
+
+    def test_settings_post_cannot_modify_other_account(self):
+        targets = list(
+            AccountTarget.objects
+            .filter(account=self.account)
+            .select_related("etf")
+            .order_by("etf__ticker")
+        )
+
+        original_targets = dict(
+            AccountTarget.objects
+            .filter(account=self.account)
+            .values_list(
+                "etf__ticker",
+                "target_percent",
+            )
+        )
+
+        other_target = AccountTarget.objects.get(
+            account=self.other_account,
+            etf__ticker="SCHB",
+        )
+
+        post_data = {
+            "form-TOTAL_FORMS": str(len(targets)),
+            "form-INITIAL_FORMS": str(len(targets)),
+            "form-MIN_NUM_FORMS": "0",
+            "form-MAX_NUM_FORMS": "1000",
+        }
+
+        for index, target in enumerate(targets):
+            target_id = target.pk
+            target_percent = target.target_percent
+
+            if target.etf.ticker == "SCHB":
+                # Attempt to substitute another account's target.
+                target_id = other_target.pk
+                target_percent = 35
+
+            if target.etf.ticker == "VTEB":
+                target_percent = 30
+
+            post_data[
+                f"form-{index}-id"
+            ] = str(target_id)
+
+            post_data[
+                f"form-{index}-target_percent"
+            ] = str(target_percent)
+
+        url = reverse(
+            "portfolio:account_settings",
+            kwargs={
+                "account_id": self.account.pk,
+            },
+        )
+
+        response = self.client.post(
+            url,
+            post_data,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        saved_targets = dict(
+            AccountTarget.objects
+            .filter(account=self.account)
+            .values_list(
+                "etf__ticker",
+                "target_percent",
+            )
+        )
+
+        self.assertEqual(
+            saved_targets,
+            original_targets,
+        )
+
+        other_target.refresh_from_db()
+
+        self.assertEqual(
+            other_target.target_percent,
+            100,
+        )

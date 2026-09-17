@@ -12,6 +12,15 @@ urlpatterns = [
         name="dashboard",
     ),
     path(
+        (
+            "accounts/"
+            "<int:account_id>/"
+            "settings/"
+        ),
+        views.account_settings,
+        name="account_settings",
+    ),
+    path(
         "holdings/<str:ticker>/",
         views.holding_detail,
         name="holding_detail",

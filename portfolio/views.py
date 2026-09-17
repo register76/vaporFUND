@@ -19,6 +19,7 @@ from django.shortcuts import (
 from django.db.models import Sum
 
 from .forms import (
+    AccountTargetFormSet,
     ContributionForm,
     PurchaseExecutionForm,
 )
@@ -404,6 +405,64 @@ def dashboard(request):
     return render(
         request,
         "portfolio/dashboard.html",
+        context,
+    )
+
+@require_http_methods(["GET", "POST"])
+def account_settings(
+    request,
+    account_id,
+):
+    account = get_object_or_404(
+        Account,
+        pk=account_id,
+        is_active=True,
+    )
+
+    targets = (
+        AccountTarget.objects
+        .filter(account=account)
+        .select_related("etf")
+        .order_by("etf__ticker")
+    )
+
+    if request.method == "POST":
+        target_formset = AccountTargetFormSet(
+            request.POST,
+            queryset=targets,
+        )
+
+        if target_formset.is_valid():
+            target_formset.save()
+
+            messages.success(
+                request,
+                f"Target allocation updated for {account.name}.",
+            )
+
+            return redirect(
+                "portfolio:account_settings",
+                account_id=account.pk,
+            )
+    else:
+        target_formset = AccountTargetFormSet(
+            queryset=targets,
+        )
+
+    target_total = sum(
+        target.target_percent
+        for target in targets
+    )
+
+    context = {
+        "account": account,
+        "target_formset": target_formset,
+        "target_total": target_total,
+    }
+
+    return render(
+        request,
+        "portfolio/account_settings.html",
         context,
     )
 

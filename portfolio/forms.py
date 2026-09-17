@@ -3,6 +3,8 @@ from decimal import Decimal
 
 from django import forms
 
+from .models import AccountTarget
+
 class ContributionForm(forms.Form):
     contribution_date = forms.DateField(
         label="Contribution date",
@@ -27,6 +29,73 @@ class ContributionForm(forms.Form):
             }
         ),
     )
+
+class AccountTargetForm(forms.ModelForm):
+    class Meta:
+        model = AccountTarget
+        fields = [
+            "target_percent",
+        ]
+        widgets = {
+            "target_percent": forms.NumberInput(
+                attrs={
+                    "min": "0",
+                    "max": "100",
+                    "step": "1",
+                    "inputmode": "numeric",
+                }
+            ),
+        }
+
+
+class BaseAccountTargetFormSet(
+    forms.BaseModelFormSet
+):
+    def add_fields(
+        self,
+        form,
+        index,
+    ):
+        super().add_fields(
+            form,
+            index,
+        )
+
+        pk_name = self.model._meta.pk.name
+
+        if pk_name in form.fields:
+            form.fields[
+                pk_name
+            ].queryset = self.get_queryset()
+
+    def clean(self):
+        super().clean()
+
+        if any(self.errors):
+            return
+
+        total = sum(
+            form.cleaned_data.get(
+                "target_percent",
+                0,
+            )
+            for form in self.forms
+        )
+
+        if total != 100:
+            raise forms.ValidationError(
+                "Target allocations must total exactly 100%. "
+                f"Current total: {total}%."
+            )
+
+
+AccountTargetFormSet = forms.modelformset_factory(
+    AccountTarget,
+    form=AccountTargetForm,
+    formset=BaseAccountTargetFormSet,
+    extra=0,
+)
+
 
 class PurchaseExecutionForm(forms.Form):
     trade_date = forms.DateField(

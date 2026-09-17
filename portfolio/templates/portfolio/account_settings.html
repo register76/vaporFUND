@@ -1,0 +1,143 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+    <title>{{ account.name }} Settings · vaporFUND</title>
+
+    <link
+        rel="stylesheet"
+        href="{% static 'portfolio/dashboard.css' %}?v=4"
+    >
+</head>
+<body>
+    <header class="site-header">
+        <div>
+            <p class="eyebrow">VAPORWARE LABS</p>
+            <h1>vapor<span>FUND</span></h1>
+            <p class="subtitle">
+                {{ account.name }}
+            </p>
+        </div>
+
+        <div class="header-actions">
+            <a
+                class="admin-link"
+                href="{% url 'portfolio:dashboard' %}?account={{ account.pk }}"
+            >
+                Back to dashboard
+            </a>
+        </div>
+    </header>
+
+    <main>
+        {% if messages %}
+            {% for message in messages %}
+                <section class="panel">
+                    <p>{{ message }}</p>
+                </section>
+            {% endfor %}
+        {% endif %}
+
+        <section class="panel">
+            <div class="panel-heading">
+                <div>
+                    <p class="eyebrow">ACCOUNT SETTINGS</p>
+                    <h2>Target allocation</h2>
+                    <p class="panel-note">
+                        Set the desired allocation for
+                        {{ account.name }}.
+                    </p>
+                </div>
+
+                <span class="period">
+                    Total: {{ target_total }}%
+                </span>
+            </div>
+
+            <form method="post">
+                {% csrf_token %}
+                {{ target_formset.management_form }}
+
+                {% if target_formset.non_form_errors %}
+                    <div class="error-message">
+                        {{ target_formset.non_form_errors }}
+                    </div>
+                {% endif %}
+
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ETF</th>
+                                <th>Fund</th>
+                                <th>Target allocation</th>
+                            </tr>
+                        </thead>
+
+                        <tbody>
+                            {% for form in target_formset %}
+                                <tr>
+                                    <td>
+                                        <strong>
+                                            {{ form.instance.etf.ticker }}
+                                        </strong>
+                                    </td>
+
+                                    <td>
+                                        {{ form.instance.etf.name }}
+                                    </td>
+
+                                    <td>
+                                        {% for hidden in form.hidden_fields %}
+                                            {{ hidden }}
+                                        {% endfor %}
+
+                                        <div class="form-field target-percent-field">
+                                            {{ form.target_percent }}
+                                            <span>%</span>
+                                        </div>
+
+                                        {% if form.target_percent.errors %}
+                                            <div class="error-message">
+                                                {{ form.target_percent.errors }}
+                                            </div>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% empty %}
+                                <tr>
+                                    <td colspan="3">
+                                        No target allocations are configured
+                                        for this account.
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="modal-actions">
+                    <a
+                        class="admin-link"
+                        href="{% url 'portfolio:dashboard' %}?account={{ account.pk }}"
+                    >
+                        Cancel
+                    </a>
+
+                    <button
+                        type="submit"
+                        class="primary-button"
+                    >
+                        Save target allocation
+                    </button>
+                </div>
+            </form>
+        </section>
+    </main>
+</body>
+</html>

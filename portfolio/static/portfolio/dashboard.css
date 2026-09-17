@@ -1027,3 +1027,14 @@ tbody tr:last-child td {
         width: 100%;
     }
 }
+
+.target-percent-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 120px;
+}
+
+.target-percent-field input {
+    width: 84px;
+}
