@@ -10,7 +10,7 @@
     <title>vaporFUND</title>
     <link
         rel="stylesheet"
-        href="{% static 'portfolio/dashboard.css' %}?v=3"
+        href="{% static 'portfolio/dashboard.css' %}?v=5"
     >
 </head>
 <body>
@@ -45,6 +45,14 @@
                 </select>
             </form>
 
+            <button
+                type="button"
+                class="admin-link"
+                id="account-settings-open"
+            >
+                Account Settings
+            </button>
+            
             <a class="admin-link" href="/admin/">
                 Django Admin
             </a>
@@ -216,6 +224,123 @@
 
                         <button type="submit" class="primary-button">
                             Add contribution &amp; generate plan
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </dialog>
+
+
+        <dialog
+            class="contribution-dialog"
+            id="account-settings-dialog"
+            aria-labelledby="account-settings-dialog-title"
+        >
+            <div class="contribution-dialog-content">
+                <div class="contribution-dialog-header">
+                    <div>
+                        <p class="section-label">ACCOUNT SETTINGS</p>
+
+                        <h2 id="account-settings-dialog-title">
+                            Target allocation
+                        </h2>
+
+                        <p class="panel-note">
+                            Set the desired allocation for
+                            {{ account.name }}.
+                            Targets must total 100%.
+                        </p>
+                    </div>
+
+                    <button
+                        type="button"
+                        class="dialog-close"
+                        id="close-account-settings-modal"
+                        aria-label="Close"
+                    >
+                        &times;
+                    </button>
+                </div>
+
+                <form
+                    method="post"
+                    class="contribution-modal-form"
+                >
+                    {% csrf_token %}
+
+                    <input
+                        type="hidden"
+                        name="action"
+                        value="update_targets"
+                    >
+
+                    {{ target_formset.management_form }}
+
+                    {% if target_formset.non_form_errors %}
+                        <div class="error-message">
+                            {{ target_formset.non_form_errors }}
+                        </div>
+                    {% endif %}
+
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ETF</th>
+                                    <th>Fund</th>
+                                    <th>Target</th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                                {% for form in target_formset %}
+                                    <tr>
+                                        <td>
+                                            <strong>
+                                                {{ form.instance.etf.ticker }}
+                                            </strong>
+                                        </td>
+
+                                        <td>
+                                            {{ form.instance.etf.name }}
+                                        </td>
+
+                                        <td>
+                                            {% for hidden in form.hidden_fields %}
+                                                {{ hidden }}
+                                            {% endfor %}
+
+                                            <div class="form-field target-percent-field">
+                                                {{ form.target_percent }}
+                                                <span>%</span>
+                                            </div>
+
+                                            {% for error in form.target_percent.errors %}
+                                                <p class="field-error">
+                                                    {{ error }}
+                                                </p>
+                                            {% endfor %}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="contribution-dialog-actions">
+                        <button
+                            type="button"
+                            class="secondary-button"
+                            id="cancel-account-settings-modal"
+                        >
+                            Cancel
+                        </button>
+
+                        <button
+                            type="submit"
+                            class="primary-button"
+                        >
+                            Save target allocation
                         </button>
                     </div>
                 </form>
@@ -662,8 +787,53 @@
         {% if contribution_form.errors %}
             contributionDialog.showModal();
         {% endif %}
+
+        const accountSettingsDialog = document.getElementById(
+            "account-settings-dialog"
+        );
+
+        const openAccountSettings = document.getElementById(
+            "account-settings-open"
+        );
+
+        const closeAccountSettings = document.getElementById(
+            "close-account-settings-modal"
+        );
+
+        const cancelAccountSettings = document.getElementById(
+            "cancel-account-settings-modal"
+        );
+
+        openAccountSettings.addEventListener("click", () => {
+            accountSettingsDialog.showModal();
+        });
+
+        closeAccountSettings.addEventListener("click", () => {
+            accountSettingsDialog.close();
+        });
+
+        cancelAccountSettings.addEventListener("click", () => {
+            accountSettingsDialog.close();
+        });
+
+        accountSettingsDialog.addEventListener("click", (event) => {
+            const rect = accountSettingsDialog.getBoundingClientRect();
+
+            const clickedOutside =
+                event.clientX < rect.left ||
+                event.clientX > rect.right ||
+                event.clientY < rect.top ||
+                event.clientY > rect.bottom;
+
+            if (clickedOutside) {
+                accountSettingsDialog.close();
+            }
+        });
+
+        {% if target_formset.errors or target_formset.non_form_errors %}
+            accountSettingsDialog.showModal();
+        {% endif %}
+
     </script>
-
-
 </body>
 </html>

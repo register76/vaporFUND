@@ -65,87 +65,129 @@ def dashboard(request):
     else:
         account = active_accounts[0]
 
+    targets = (
+        AccountTarget.objects
+        .filter(account=account)
+        .select_related("etf")
+        .order_by("etf__ticker")
+    )
+
+
     if request.method == "POST":
-        contribution_form = ContributionForm(
-            request.POST
+        post_action = request.POST.get(
+            "action",
+            "add_contribution",
         )
 
-        if contribution_form.is_valid():
-            try:
-                contribution, recommendation, decision = (
-                    add_contribution_and_recommend(
-                        account=account,
-                        contribution_date=(
-                            contribution_form.cleaned_data[
-                                "contribution_date"
-                            ]
-                        ),
-                        amount=(
-                            contribution_form.cleaned_data[
-                                "amount"
-                            ]
-                        ),
-                    )
-                )
-            except WorkflowError as error:
-                messages.error(
-                    request,
-                    str(error),
-                )
-            else:
-                recommendations = list(
-                    contribution.recommendations
-                    .select_related("etf")
-                    .order_by("plan_order")
-                )
+        if post_action == "update_targets":
+            contribution_form = ContributionForm()
 
-                buy_recommendations = [
-                    item
-                    for item in recommendations
-                    if item.action
-                    == Recommendation.Action.BUY
-                ]
+            target_formset = AccountTargetFormSet(
+                request.POST,
+                queryset=targets,
+            )
 
-                if not buy_recommendations:
-                    result = (
-                        f"Contribution "
-                        f"{contribution.sequence_number} added. "
-                        f"The recommendation is to hold cash."
-                    )
-                elif len(buy_recommendations) == 1:
-                    item = buy_recommendations[0]
-
-                    result = (
-                        f"Contribution "
-                        f"{contribution.sequence_number} added. "
-                        f"Draft purchase plan: buy "
-                        f"{item.shares} {item.etf.ticker}."
-                    )
-                else:
-                    purchase_summary = ", then ".join(
-                        f"buy {item.shares} "
-                        f"{item.etf.ticker}"
-                        for item in buy_recommendations
-                    )
-
-                    result = (
-                        f"Contribution "
-                        f"{contribution.sequence_number} added. "
-                        f"Draft purchase plan: "
-                        f"{purchase_summary}."
-                    )
+            if target_formset.is_valid():
+                target_formset.save()
 
                 messages.success(
                     request,
-                    result,
+                    f"Target allocation updated for {account.name}.",
                 )
 
                 return redirect(
                     f"{request.path}?account={account.pk}"
                 )
 
+        else:
+            target_formset = AccountTargetFormSet(
+                queryset=targets,
+            )
+
+            contribution_form = ContributionForm(
+                request.POST
+            )
+
+            if contribution_form.is_valid():
+                try:
+                    contribution, recommendation, decision = (
+                        add_contribution_and_recommend(
+                            account=account,
+                            contribution_date=(
+                                contribution_form.cleaned_data[
+                                    "contribution_date"
+                                ]
+                            ),
+                            amount=(
+                                contribution_form.cleaned_data[
+                                    "amount"
+                                ]
+                            ),
+                        )
+                    )
+                except WorkflowError as error:
+                    messages.error(
+                        request,
+                        str(error),
+                    )
+                else:
+                    recommendations = list(
+                        contribution.recommendations
+                        .select_related("etf")
+                        .order_by("plan_order")
+                    )
+
+                    buy_recommendations = [
+                        item
+                        for item in recommendations
+                        if item.action
+                        == Recommendation.Action.BUY
+                    ]
+
+                    if not buy_recommendations:
+                        result = (
+                            f"Contribution "
+                            f"{contribution.sequence_number} added. "
+                            f"The recommendation is to hold cash."
+                        )
+                    elif len(buy_recommendations) == 1:
+                        item = buy_recommendations[0]
+
+                        result = (
+                            f"Contribution "
+                            f"{contribution.sequence_number} added. "
+                            f"Draft purchase plan: buy "
+                            f"{item.shares} {item.etf.ticker}."
+                        )
+                    else:
+                        purchase_summary = ", then ".join(
+                            f"buy {item.shares} "
+                            f"{item.etf.ticker}"
+                            for item in buy_recommendations
+                        )
+
+                        result = (
+                            f"Contribution "
+                            f"{contribution.sequence_number} added. "
+                            f"Draft purchase plan: "
+                            f"{purchase_summary}."
+                        )
+
+                    messages.success(
+                        request,
+                        result,
+                    )
+
+                    return redirect(
+                        f"{request.path}?account={account.pk}"
+                    )
+
     else:
         contribution_form = ContributionForm()
+
+        target_formset = AccountTargetFormSet(
+            queryset=targets,
+        )
 
     as_of_date = date.today()
 
@@ -398,6 +440,7 @@ def dashboard(request):
         "holdings": holdings,
         "configured_targets": configured_targets,
         "contribution_form": contribution_form,
+        "target_formset": target_formset,
         "account": account,
         "active_accounts": active_accounts,
     }

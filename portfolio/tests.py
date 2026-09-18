@@ -1409,6 +1409,73 @@ class DashboardContributionTests(TestCase):
             'id="contribution-dialog"',
         )
 
+    def test_dashboard_target_allocation_update_saves(self):
+        targets = list(
+            AccountTarget.objects
+            .filter(account=self.account)
+            .select_related("etf")
+            .order_by("etf__ticker")
+        )
+
+        new_targets = {
+            "AVUV": 10,
+            "SCHB": 35,
+            "VEA": 15,
+            "VTEB": 30,
+            "VWO": 5,
+            "XMMO": 5,
+        }
+
+        post_data = {
+            "action": "update_targets",
+            "form-TOTAL_FORMS": str(len(targets)),
+            "form-INITIAL_FORMS": str(len(targets)),
+            "form-MIN_NUM_FORMS": "0",
+            "form-MAX_NUM_FORMS": "1000",
+        }
+
+        for index, target in enumerate(targets):
+            post_data[
+                f"form-{index}-id"
+            ] = str(target.pk)
+
+            post_data[
+                f"form-{index}-target_percent"
+            ] = str(
+                new_targets[
+                    target.etf.ticker
+                ]
+            )
+
+        response = self.client.post(
+            f"{self.url}?account={self.account.pk}",
+            post_data,
+        )
+
+        self.assertEqual(
+            response.status_code,
+            302,
+        )
+
+        saved_targets = dict(
+            AccountTarget.objects
+            .filter(account=self.account)
+            .values_list(
+                "etf__ticker",
+                "target_percent",
+            )
+        )
+
+        self.assertEqual(
+            saved_targets,
+            new_targets,
+        )
+
+        self.assertEqual(
+            Contribution.objects.count(),
+            0,
+        )
+
     def test_post_creates_contribution_deposit_and_draft(self):
         response = self.post_contribution()
 

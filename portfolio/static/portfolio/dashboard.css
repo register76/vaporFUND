@@ -100,6 +100,14 @@ main,
         background-color 150ms ease;
 }
 
+button.admin-link {
+    appearance: none;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+}
+
 .admin-link:hover {
     border-color: var(--green);
     background: rgba(75, 230, 165, 0.08);
