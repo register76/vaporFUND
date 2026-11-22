@@ -3,6 +3,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib import messages
+from django.http import Http404
 
 from django.views.decorators.http import (
     require_GET,
@@ -32,6 +33,7 @@ from .models import (
     ETF,
     HoldingLot,
     Recommendation,
+    TradeExecution,
 )
 
 from .services import (
@@ -47,8 +49,7 @@ from .workflows import (
     execute_recommendation,
 )
 
-def dashboard(request):
-
+def _select_account(request):
     active_accounts = get_list_or_404(
         Account.objects.order_by("name"),
         is_active=True,
@@ -57,6 +58,11 @@ def dashboard(request):
     selected_account_id = request.GET.get("account")
 
     if selected_account_id:
+        try:
+            selected_account_id = int(selected_account_id)
+        except ValueError as error:
+            raise Http404("Invalid account.") from error
+
         account = get_object_or_404(
             Account,
             pk=selected_account_id,
@@ -64,6 +70,97 @@ def dashboard(request):
         )
     else:
         account = active_accounts[0]
+
+    return account, active_accounts
+
+
+def _portfolio_snapshot(account, as_of_date):
+    cash_balance = (
+        CashTransaction.objects.filter(
+            account=account,
+            date__lte=as_of_date
+        ).aggregate(
+            total=Sum("amount")
+        )["total"]
+        or Decimal("0.00")
+    )
+
+    holding_totals = list(
+        HoldingLot.objects.filter(
+            execution__recommendation__contribution__account=account,
+            purchase_date__lte=as_of_date,
+            shares_remaining__gt=0,
+        )
+        .values(
+            "etf_id",
+            "etf__ticker",
+            "etf__name",
+        )
+        .annotate(
+            total_shares=Sum("shares_remaining"),
+            total_cost=Sum("total_cost"),
+        )
+        .order_by("etf__ticker")
+    )
+
+    holdings = []
+    total_holding_value = Decimal("0.00")
+
+    for holding in holding_totals:
+        etf = ETF.objects.get(
+            id=holding["etf_id"]
+        )
+
+        try:
+            price = latest_price(
+                etf,
+                as_of_date,
+            )
+            reference_price = price.close
+            price_date = price.date
+        except AllocationError:
+            reference_price = Decimal("0.00")
+            price_date = None
+
+        market_value = (
+            reference_price
+            * holding["total_shares"]
+        ).quantize(
+            Decimal("0.01")
+        )
+
+        total_holding_value += market_value
+
+        holdings.append(
+            {
+                "etf_id": etf.pk,
+                "ticker": etf.ticker,
+                "name": etf.name,
+                "shares": holding["total_shares"],
+                "total_cost": holding["total_cost"],
+                "reference_price": reference_price,
+                "price_date": price_date,
+                "market_value": market_value,
+            }
+        )
+
+    total_holding_value = (
+        total_holding_value.quantize(
+            Decimal("0.01")
+        )
+    )
+
+    portfolio_value = (
+        total_holding_value + cash_balance
+    ).quantize(
+        Decimal("0.01")
+    )
+
+    return holdings, total_holding_value, cash_balance, portfolio_value
+
+
+def dashboard(request):
+    account, active_accounts = _select_account(request)
 
     targets = (
         AccountTarget.objects
@@ -191,84 +288,8 @@ def dashboard(request):
 
     as_of_date = date.today()
 
-    cash_balance = (
-        CashTransaction.objects.filter(
-            account=account,
-            date__lte=as_of_date
-        ).aggregate(
-            total=Sum("amount")
-        )["total"]
-        or Decimal("0.00")
-    )
-
-    holding_totals = list(
-        HoldingLot.objects.filter(
-            execution__recommendation__contribution__account=account,
-            purchase_date__lte=as_of_date,
-            shares_remaining__gt=0,
-        )
-        .values(
-            "etf_id",
-            "etf__ticker",
-            "etf__name",
-        )
-        .annotate(
-            total_shares=Sum("shares_remaining"),
-            total_cost=Sum("total_cost"),
-        )
-        .order_by("etf__ticker")
-    )
-
-    holdings = []
-    total_holding_value = Decimal("0.00")
-
-    for holding in holding_totals:
-        etf = ETF.objects.get(
-            id=holding["etf_id"]
-        )
-
-        try:
-            price = latest_price(
-                etf,
-                as_of_date,
-            )
-            reference_price = price.close
-            price_date = price.date
-        except AllocationError:
-            reference_price = Decimal("0.00")
-            price_date = None
-
-        market_value = (
-            reference_price
-            * holding["total_shares"]
-        ).quantize(
-            Decimal("0.01")
-        )
-
-        total_holding_value += market_value
-
-        holdings.append(
-            {
-                "ticker": etf.ticker,
-                "name": etf.name,
-                "shares": holding["total_shares"],
-                "total_cost": holding["total_cost"],
-                "reference_price": reference_price,
-                "price_date": price_date,
-                "market_value": market_value,
-            }
-        )
-
-    total_holding_value = (
-        total_holding_value.quantize(
-            Decimal("0.01")
-        )
-    )
-
-    portfolio_value = (
-        total_holding_value + cash_balance
-    ).quantize(
-        Decimal("0.01")
+    holdings, total_holding_value, cash_balance, portfolio_value = (
+        _portfolio_snapshot(account, as_of_date)
     )
 
     decision = None
@@ -514,152 +535,53 @@ def holding_detail(
     request,
     ticker,
 ):
-    active_accounts = get_list_or_404(
-        Account.objects.order_by("name"),
-        is_active=True,
-    )
-
-    selected_account_id = request.GET.get("account")
-
-    if selected_account_id:
-        account = get_object_or_404(
-            Account,
-            pk=selected_account_id,
-            is_active=True,
-        )
-    else:
-        account = active_accounts[0]
-
-    etf = get_object_or_404(
-        ETF,
-        ticker__iexact=ticker,
-    )
-
+    account, active_accounts = _select_account(request)
+    etf = get_object_or_404(ETF, ticker__iexact=ticker)
     as_of_date = date.today()
 
-    lots = (
-        HoldingLot.objects
-        .filter(
-            execution__recommendation__contribution__account=account,
-            etf=etf,
-            shares_remaining__gt=0,
-        )
-        .select_related(
-            "execution",
-            "execution__recommendation",
-            "execution__recommendation__contribution",
-        )
-        .order_by(
-            "-purchase_date",
-            "-created_at",
-        )
-    )
+    lots = HoldingLot.objects.filter(
+        execution__recommendation__contribution__account=account,
+        etf=etf,
+        purchase_date__lte=as_of_date,
+        shares_remaining__gt=0,
+    ).order_by("-purchase_date", "-created_at", "-pk")
 
-    holding_totals = lots.aggregate(
-        total_shares=Sum("shares_remaining"),
-        total_cost=Sum("total_cost"),
-    )
+    executions = TradeExecution.objects.filter(
+        recommendation__contribution__account=account,
+        etf=etf,
+        trade_date__lte=as_of_date,
+    ).order_by("-trade_date", "-created_at", "-pk")
 
-    total_shares = (
-        holding_totals["total_shares"]
-        or 0
-    )
+    target = AccountTarget.objects.filter(account=account, etf=etf).first()
+    holdings, _, _, portfolio_value = _portfolio_snapshot(account, as_of_date)
+    holding = next((row for row in holdings if row["etf_id"] == etf.pk), None)
 
-    total_cost = (
-        holding_totals["total_cost"]
-        or Decimal("0.00")
-    )
+    if holding is None and target is None and not executions:
+        raise Http404("Holding not found in this account.")
 
-    if total_shares:
-        average_cost_basis = (
-            total_cost
-            / Decimal(total_shares)
-        ).quantize(
-            Decimal("0.01")
-        )
+    total_shares = holding["shares"] if holding else 0
+    total_cost = holding["total_cost"] if holding else Decimal("0.00")
+    average_cost_basis = (
+        (total_cost / total_shares).quantize(Decimal("0.01"))
+        if total_shares else Decimal("0.00")
+    )
+    if holding:
+        current_price = holding["reference_price"]
+        price_date = holding["price_date"]
     else:
-        average_cost_basis = Decimal("0.00")
-
-    try:
-        price = latest_price(
-            etf,
-            as_of_date,
-        )
-        current_price = price.close
-        price_date = price.date
-    except AllocationError:
-        current_price = Decimal("0.00")
-        price_date = None
-
-    current_value = (
-        current_price
-        * Decimal(total_shares)
-    ).quantize(
-        Decimal("0.01")
-    )
-
-    account_holding_totals = (
-        HoldingLot.objects
-        .filter(
-            execution__recommendation__contribution__account=account,
-            shares_remaining__gt=0,
-        )
-        .values("etf_id")
-        .annotate(
-            total_shares=Sum("shares_remaining")
-        )
-    )
-
-    total_holding_value = Decimal("0.00")
-
-    for holding in account_holding_totals:
-        holding_etf = ETF.objects.get(
-            pk=holding["etf_id"]
-        )
-
         try:
-            holding_price = latest_price(
-                holding_etf,
-                as_of_date,
-            )
-            holding_value = (
-                holding_price.close
-                * Decimal(
-                    holding["total_shares"]
-                )
-            ).quantize(
-                Decimal("0.01")
-            )
+            price = latest_price(etf, as_of_date)
+            current_price = price.close
+            price_date = price.date
         except AllocationError:
-            holding_value = Decimal("0.00")
-
-        total_holding_value += holding_value
-
-    if total_holding_value > 0:
-        current_allocation = (
-            current_value
-            / total_holding_value
-            * Decimal("100")
-        ).quantize(
-            Decimal("0.01")
-        )
-    else:
-        current_allocation = Decimal("0.00")
-
-    target = (
-        AccountTarget.objects
-        .filter(
-            account=account,
-            etf=etf,
-        )
-        .first()
+            current_price = Decimal("0.00")
+            price_date = None
+    current_value = holding["market_value"] if holding else Decimal("0.00")
+    current_allocation = (
+        (current_value / portfolio_value * Decimal("100")).quantize(Decimal("0.01"))
+        if portfolio_value > 0 else Decimal("0.00")
     )
-
-    target_allocation = Decimal(
-        target.target_percent
-        if target
-        else 0
-    )
+    target_allocation = target.target_percent if target else 0
 
     allocation_drift = (
         current_allocation
@@ -674,6 +596,7 @@ def holding_detail(
         "as_of_date": as_of_date,
         "etf": etf,
         "lots": lots,
+        "executions": executions,
         "total_shares": total_shares,
         "total_cost": total_cost,
         "average_cost_basis": average_cost_basis,

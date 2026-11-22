@@ -537,7 +537,12 @@
                             <div class="allocation-heading">
                                 <div>
                                     <strong>
-                                        {{ row.etf.ticker }}
+                                        <a
+                                            class="holding-link"
+                                            href="{% url 'portfolio:holding_detail' row.etf.ticker %}?account={{ account.pk }}"
+                                        >
+                                            {{ row.etf.ticker }}
+                                        </a>
                                     </strong>
                                     <span>
                                         {{ row.etf.name }}
@@ -599,7 +604,14 @@
                         <article class="allocation-row">
                             <div class="allocation-heading">
                                 <div>
-                                    <strong>{{ target.etf.ticker }}</strong>
+                                    <strong>
+                                        <a
+                                            class="holding-link"
+                                            href="{% url 'portfolio:holding_detail' target.etf.ticker %}?account={{ account.pk }}"
+                                        >
+                                            {{ target.etf.ticker }}
+                                        </a>
+                                    </strong>
                                     <span>{{ target.etf.name }}</span>
                                 </div>
 

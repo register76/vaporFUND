@@ -33,6 +33,7 @@ from .services import (
 from .workflows import (
     add_contribution_and_recommend,
     create_contribution,
+    execute_recommendation,
 )
 
 def set_account_targets(account, targets):
@@ -3049,3 +3050,110 @@ class AccountSettingsTests(TestCase):
             other_target.target_percent,
             100,
         )
+
+
+class HoldingDetailTests(TestCase):
+    def setUp(self):
+        self.account = Account.objects.create(name="Account A")
+        self.other_account = Account.objects.create(name="Account B")
+        self.etf = ETF.objects.create(
+            ticker="DETAIL",
+            name="Holding Detail ETF",
+            asset_class=ETF.AssetClass.STOCK,
+        )
+        AccountTarget.objects.create(
+            account=self.account,
+            etf=self.etf,
+            target_percent=100,
+        )
+        self.trade_date = date(2020, 1, 2)
+        PriceHistory.objects.create(
+            etf=self.etf,
+            date=self.trade_date,
+            close=Decimal("20.00"),
+            adjusted_close=Decimal("20.00"),
+        )
+        self.detail_url = reverse("portfolio:holding_detail", args=[self.etf.ticker])
+
+    def record_purchase(self, account, shares, trade_date):
+        contribution = create_contribution(
+            account=account,
+            contribution_date=trade_date,
+            amount="100.00",
+        )
+        recommendation = Recommendation.objects.create(
+            contribution=contribution,
+            etf=self.etf,
+            action=Recommendation.Action.BUY,
+            status=Recommendation.Status.DRAFT,
+            available_cash=Decimal("100.00"),
+            portfolio_value=Decimal("100.00"),
+            current_value=Decimal("0.00"),
+            target_value=Decimal("100.00"),
+            target_shortfall=Decimal("100.00"),
+            reference_price=Decimal("10.00"),
+            price_date=self.trade_date,
+            shares=shares,
+            estimated_cost=Decimal("10.00") * shares,
+            reason="Holding detail test",
+        )
+        execution, lot, _ = execute_recommendation(
+            recommendation=recommendation,
+            trade_date=trade_date,
+            price_per_share=Decimal("10.00"),
+            shares=shares,
+        )
+        return execution, lot
+
+    def test_dashboard_link_preserves_selected_account(self):
+        self.record_purchase(self.account, 2, self.trade_date)
+        response = self.client.get(
+            reverse("portfolio:dashboard"), {"account": self.account.pk}
+        )
+        self.assertContains(response, f'href="{self.detail_url}?account={self.account.pk}"')
+
+    def test_displays_position_and_account_scoped_history(self):
+        closed, lot = self.record_purchase(self.account, 1, self.trade_date)
+        lot.shares_remaining = 0
+        lot.save(update_fields=["shares_remaining"])
+        current, _ = self.record_purchase(self.account, 2, date(2020, 1, 3))
+        self.record_purchase(self.other_account, 7, self.trade_date)
+        self.record_purchase(self.account, 5, date(2099, 1, 1))
+
+        response = self.client.get(self.detail_url, {"account": self.account.pk})
+        self.assertContains(response, self.etf.ticker)
+        self.assertContains(response, "$40.00")
+        self.assertContains(response, "19.05%")
+        self.assertContains(response, "100%")
+        self.assertEqual(response.context["total_shares"], 2)
+        self.assertEqual(list(response.context["executions"]), [current, closed])
+
+        other_response = self.client.get(self.detail_url, {"account": self.other_account.pk})
+        self.assertEqual(other_response.context["total_shares"], 7)
+        self.assertEqual(other_response.context["target_allocation"], 0)
+        self.assertNotIn(current, other_response.context["executions"])
+
+    def test_holding_in_another_account_is_not_available(self):
+        self.record_purchase(self.account, 2, self.trade_date)
+        response = self.client.get(self.detail_url, {"account": self.other_account.pk})
+        self.assertEqual(response.status_code, 404)
+
+    def test_configured_target_without_purchases_shows_empty_history(self):
+        self.record_purchase(self.other_account, 2, self.trade_date)
+        response = self.client.get(self.detail_url, {"account": self.account.pk})
+        self.assertContains(response, "No purchases recorded for this holding.")
+        self.assertEqual(response.context["total_shares"], 0)
+
+    def test_invalid_inactive_and_unknown_selections_return_404(self):
+        self.other_account.is_active = False
+        self.other_account.save(update_fields=["is_active"])
+        for account_id in ("invalid", self.other_account.pk, 999999):
+            with self.subTest(account_id=account_id):
+                response = self.client.get(self.detail_url, {"account": account_id})
+                self.assertEqual(response.status_code, 404)
+
+        response = self.client.get(
+            reverse("portfolio:holding_detail", args=["UNKNOWN"]),
+            {"account": self.account.pk},
+        )
+        self.assertEqual(response.status_code, 404)
